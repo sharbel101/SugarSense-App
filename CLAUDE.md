@@ -9,7 +9,7 @@ disagree, the PDF wins - then fix this file.
 
 - **Greenfield.** The reference is a *design document: intended behaviour, not implemented
   behaviour.* Do not describe anything here as working until it exists and its tests pass.
-- Standalone project in its own repo, `sharbel101/sugarsense-APP` (branch `main`). It is **unrelated
+- Standalone project in its own repo, `sharbel101/SugarSense-App` (branch `main`). It is **unrelated
   to the Garmin watch apps (GlucoGuard)** - never import code from them.
 - Working agreement: **run the tests and show real PASS/FAIL output before saying code works.**
   Report failures and skipped steps plainly. If an acceptance threshold (PDF Sec 11.3) is not met,
