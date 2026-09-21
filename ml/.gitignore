@@ -1,0 +1,17 @@
+# environment
+.venv/
+
+# datasets: OhioT1DM is released under a data use agreement - never commit raw or derived data
+data/*
+!data/.gitkeep
+
+# model artefacts and experiment output
+artifacts/
+runs/
+
+# caches
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/

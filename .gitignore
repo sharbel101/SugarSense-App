@@ -7,13 +7,24 @@ __pycache__/
 dist/
 web-build/
 .expo/
+coverage/
+*.tsbuildinfo
+
+# android / signing (never commit keystores or built binaries)
+.gradle/
+local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
 
 # environment / secrets
 .env
 .env.*
 !.env.example
 
-# logs and OS files
+# logs, editors, OS files
 *.log
+.idea/
 .DS_Store
 Thumbs.db

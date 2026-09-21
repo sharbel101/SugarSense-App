@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sugarsense-ml"
+version = "0.0.0"
+description = "SugarSense modelling layer: dataset prep, Mode A residual, Mode B sequence model, evaluation."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # numerics / data
+    "numpy",
+    "scipy",
+    "pandas",
+    "pyarrow",
+    # classical ML (Mode A residual: ridge -> gradient-boosted trees, quantile objective)
+    "scikit-learn",
+    "lightgbm",
+    # deep learning (Mode B: dilated causal TCN) - CPU wheel on Windows
+    "torch",
+    # export / on-device inference checks (ONNX Runtime Mobile is a candidate runtime)
+    "onnx",
+    "onnxruntime",
+    # exploration / plotting
+    "matplotlib",
+    "jupyterlab",
+    "ipykernel",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+include = ["sugarsense_ml*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "NPY"]

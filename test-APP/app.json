@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "SugarSense",
+    "slug": "sugarsense",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F7F9FC"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "android": {
+      "package": "com.sugarsense.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#F7F9FC"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "com.sugarsense.app",
+      "supportsTablet": false
+    }
+  }
+}
