@@ -10,7 +10,7 @@ does not yet follow the safety/copy rules in `CLAUDE.md`. No BLE code, data mode
 The only backend route is the `/health` liveness probe (not used by the UI).
 
 ```
-SugarSense/                 (this repo, branch `sugarsense_app` of sharbel101/GlucoGuard)
+SugarSense/                 (this repo: sharbel101/sugarsense-APP)
 ├── mobile/    React Native + Expo (TypeScript) - web now, Android/iOS dev builds later
 ├── backend/   NestJS (TypeScript) - Postgres/Supabase-ready
 └── ml/        Python 3.12 virtualenv - numpy, pandas, scikit-learn, LightGBM, PyTorch, ONNX
