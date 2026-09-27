@@ -9,16 +9,19 @@ import { GlucoseChart } from '../components/GlucoseChart';
 import { Icon, IconName } from '../components/Icon';
 import { advancedForecastDetails, currentGlucose, forecastFactors, predictChart } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
-import { colors, radius, spacing } from '../theme';
+import { ColorPalette, radius, spacing, useColors } from '../theme';
 
-const FACTOR_BG: Record<string, { bg: string; fg: string }> = {
-  blue: { bg: colors.blue100, fg: colors.blue600 },
-  amber: { bg: colors.amber100, fg: colors.amber600 },
-  purple: { bg: colors.purple100, fg: colors.purple600 },
-  green: { bg: colors.green100, fg: colors.green600 },
-};
+function factorPalette(colors: ColorPalette): Record<string, { bg: string; fg: string }> {
+  return {
+    blue: { bg: colors.blue100, fg: colors.blue600 },
+    amber: { bg: colors.amber100, fg: colors.amber600 },
+    purple: { bg: colors.purple100, fg: colors.purple600 },
+    green: { bg: colors.green100, fg: colors.green600 },
+  };
+}
 
 export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
+  const colors = useColors();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { tooltip } = predictChart;
   const tooltipLeftPct = (predictChart.highlightPoint.x / predictChart.viewBoxWidth) * 100;
@@ -34,7 +37,9 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
           alignItems: 'center',
         }}
       >
-        <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>Predict</Text>
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>
+          Predict
+        </Text>
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
@@ -59,6 +64,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
               highlightPoint={predictChart.highlightPoint}
               gridLinesY={predictChart.gridLinesY}
               height={predictChart.viewBoxHeight}
+              accessibilityLabel="Predicted glucose range for the next 2 hours. The shaded band shows the uncertainty and widens further out."
             />
             <View
               style={{
@@ -72,11 +78,11 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
                 width: 152,
               }}
             >
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 12.5, color: '#FFFFFF' }}>{tooltip.minutes} minutes</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#FFFFFFDD', marginTop: 2 }}>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.onInk }}>{tooltip.minutes} minutes</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.onInk2, marginTop: 2 }}>
                 Median: {tooltip.median} mg/dL
               </Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#FFFFFFDD' }}>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.onInk2 }}>
                 Range: {tooltip.low}–{tooltip.high} mg/dL
               </Text>
             </View>
@@ -92,7 +98,6 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
             label="Why this forecast?"
             onPress={() => setShowAdvanced((v) => !v)}
             icon={<Icon name="chevronDown" size={14} color={colors.blue600} />}
-            style={{ marginTop: 6 }}
           />
         </Card>
 
@@ -106,15 +111,14 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
             <FactorRow key={factor.label} icon={factor.icon} bg={factor.bg} label={factor.label} value={factor.value} />
           ))}
 
-          <View style={{ borderTopWidth: 1, borderTopColor: colors.divider, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 10 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: colors.divider, paddingHorizontal: 12, paddingBottom: 2 }}>
             <GhostButton
               label={showAdvanced ? 'Hide advanced details' : 'Advanced details'}
               onPress={() => setShowAdvanced((v) => !v)}
-              style={{ paddingVertical: 6 }}
             />
             {showAdvanced ? (
               <View style={{ backgroundColor: colors.ground, borderRadius: radius.row, padding: 14, marginTop: 6 }}>
-                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink2, lineHeight: 20 }}>
+                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>
                   {advancedForecastDetails}
                 </Text>
               </View>
@@ -127,7 +131,9 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
 }
 
 function FactorRow({ icon, bg, label, value }: { icon: IconName; bg: string; label: string; value: string }) {
-  const palette = FACTOR_BG[bg] ?? FACTOR_BG.blue;
+  const colors = useColors();
+  const palettes = factorPalette(colors);
+  const palette = palettes[bg] ?? palettes.blue;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 9 }}>
       <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: palette.bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -135,7 +141,7 @@ function FactorRow({ icon, bg, label, value }: { icon: IconName; bg: string; lab
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{label}</Text>
-        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink2 }}>{value}</Text>
+        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2 }}>{value}</Text>
       </View>
     </View>
   );

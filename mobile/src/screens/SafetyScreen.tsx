@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { Icon } from '../components/Icon';
+import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { safetyAttention, safetyNormal, wearableAttention, wearableNormal } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
-import { colors, radius, spacing } from '../theme';
+import { radius, spacing, useColors } from '../theme';
 
 type Severity = 'normal' | 'attention';
 
 export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
+  const colors = useColors();
   const [severity, setSeverity] = useState<Severity>('normal');
 
   return (
@@ -25,7 +27,9 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
           alignItems: 'center',
         }}
       >
-        <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>Safety</Text>
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>
+          Safety
+        </Text>
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
@@ -81,9 +85,9 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
               />
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 11.5, color: colors.ink3 }}>Now</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 11.5, color: colors.ink3 }}>+1h</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 11.5, color: colors.ink3 }}>+2h</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink3 }}>Now</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink3 }}>+1h</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink3 }}>+2h</Text>
             </View>
           </Card>
         ) : (
@@ -96,7 +100,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{factor.label}</Text>
-                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink2 }}>{factor.value}</Text>
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2 }}>{factor.value}</Text>
                 </View>
               </View>
             ))}
@@ -118,7 +122,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
             <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>
               {safetyAttention.suggestion.title}
             </Text>
-            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink2, marginTop: 4, lineHeight: 18 }}>
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 4, lineHeight: 20 }}>
               {safetyAttention.suggestion.body}
             </Text>
           </Card>
@@ -129,7 +133,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
             <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Wearable</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green600 }} />
-              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12.5, color: colors.green600 }}>Connected</Text>
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.green600 }}>Connected</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row' }}>
@@ -138,7 +142,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
             <Metric label="Movement" value={severity === 'normal' ? wearableNormal.movement : wearableAttention.movement} />
             <Metric label="Coverage" value={severity === 'normal' ? wearableNormal.coverage : wearableAttention.coverage} />
           </View>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink3, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10, lineHeight: 17 }}>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10, lineHeight: 18 }}>
             Wearable context is contributing to your risk assessment.
           </Text>
         </Card>
@@ -147,33 +151,17 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
   );
 }
 
+const SEVERITY_OPTIONS: SegmentOption<Severity>[] = [
+  { value: 'normal', label: 'Preview: Normal', accessibilityLabel: 'Preview normal state' },
+  { value: 'attention', label: 'Preview: Attention', accessibilityLabel: 'Preview attention state' },
+];
+
 function SeveritySwitch({ value, onChange }: { value: Severity; onChange: (v: Severity) => void }) {
-  return (
-    <View style={{ flexDirection: 'row', backgroundColor: colors.divider, borderRadius: radius.pill, padding: 3 }}>
-      {(['normal', 'attention'] as Severity[]).map((option) => (
-        <Pressable
-          key={option}
-          onPress={() => onChange(option)}
-          accessibilityRole="button"
-          accessibilityLabel={`Preview ${option} state`}
-          style={{
-            flex: 1,
-            paddingVertical: 8,
-            borderRadius: radius.pill,
-            alignItems: 'center',
-            backgroundColor: value === option ? colors.surface : 'transparent',
-          }}
-        >
-          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 12.5, color: value === option ? colors.ink : colors.ink3 }}>
-            Preview: {option === 'normal' ? 'Normal' : 'Attention'}
-          </Text>
-        </Pressable>
-      ))}
-    </View>
-  );
+  return <SegmentedControl options={SEVERITY_OPTIONS} value={value} onChange={onChange} />;
 }
 
 function IconBadge({ children }: { children: React.ReactNode }) {
+  const colors = useColors();
   return (
     <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' }}>
       {children}
@@ -182,6 +170,7 @@ function IconBadge({ children }: { children: React.ReactNode }) {
 }
 
 function DetailRow({ label, value, valueColor, last }: { label: string; value: string; valueColor?: string; last?: boolean }) {
+  const colors = useColors();
   return (
     <View
       style={{
@@ -201,9 +190,10 @@ function DetailRow({ label, value, valueColor, last }: { label: string; value: s
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
+  const colors = useColors();
   return (
     <View style={{ flex: 1 }}>
-      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 11.5, color: colors.ink3 }}>{label}</Text>
+      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink3 }}>{label}</Text>
       <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink, marginTop: 2 }}>{value}</Text>
     </View>
   );

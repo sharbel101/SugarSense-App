@@ -7,9 +7,10 @@ import { GhostButton } from '../components/Buttons';
 import { Icon } from '../components/Icon';
 import { insights } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
-import { colors, spacing } from '../theme';
+import { spacing, useColors } from '../theme';
 
 export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
+  const colors = useColors();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>
       <View
@@ -21,10 +22,12 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
           alignItems: 'center',
         }}
       >
-        <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>Insights</Text>
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: colors.ink }}>
+          Insights
+        </Text>
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
-      <Text style={{ paddingHorizontal: spacing.xl, marginTop: 6, fontFamily: 'Manrope_500Medium', fontSize: 13.5, color: colors.ink3 }}>
+      <Text style={{ paddingHorizontal: spacing.xl, marginTop: 6, fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink3 }}>
         What SugarSense is learning about you
       </Text>
 
@@ -37,12 +40,11 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
               </View>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>{item.title}</Text>
             </View>
-            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: '#3A4358', lineHeight: 21 }}>{item.text}</Text>
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>{item.text}</Text>
             <GhostButton
               label="Why am I seeing this?"
               onPress={() => {}}
               icon={<Icon name="chevronRight" size={13} color={colors.blue600} />}
-              style={{ marginTop: 10 }}
             />
           </Card>
         ))}

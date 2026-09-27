@@ -2,11 +2,19 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BackButton } from '../components/Buttons';
 import { Icon, IconName } from '../components/Icon';
+import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { RootStackParamList } from '../navigation/types';
-import { colors, radius, spacing } from '../theme';
+import { radius, spacing, ThemePreference, useColors, useTheme } from '../theme';
 
 type Row = { icon: IconName; label: string; badge?: string };
+
+const THEME_OPTIONS: SegmentOption<ThemePreference>[] = [
+  { value: 'system', label: 'System', accessibilityLabel: 'Use the device appearance' },
+  { value: 'light', label: 'Light', accessibilityLabel: 'Use light appearance' },
+  { value: 'dark', label: 'Dark', accessibilityLabel: 'Use dark appearance' },
+];
 
 const SECTIONS: { title?: string; rows: Row[] }[] = [
   { title: 'Account', rows: [{ icon: 'person', label: 'Personal information' }, { icon: 'bell', label: 'Notifications' }] },
@@ -37,6 +45,7 @@ const SECTIONS: { title?: string; rows: Row[] }[] = [
 ];
 
 export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
+  const { colors, preference, setPreference } = useTheme();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
       <View
@@ -45,27 +54,13 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
           paddingTop: spacing.lg,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 14,
+          gap: 8,
         }}
       >
-        <Pressable
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            backgroundColor: colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon name="back" size={16} color={colors.ink} />
-        </Pressable>
-        <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 19, color: colors.ink }}>Profile & settings</Text>
+        <BackButton onPress={() => navigation.goBack()} accessibilityLabel="Close" />
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 20, color: colors.ink }}>
+          Profile & settings
+        </Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxxl, gap: 20 }}>
@@ -74,28 +69,22 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
             <Icon name="person" size={32} color={colors.blue600} strokeWidth={1.6} />
           </View>
           <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>Your account</Text>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3 }}>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3 }}>
             Managed by you · Connected to SugarSense
+          </Text>
+        </View>
+
+        <View>
+          <SectionTitle>Appearance</SectionTitle>
+          <SegmentedControl options={THEME_OPTIONS} value={preference} onChange={setPreference} />
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, paddingHorizontal: 4, marginTop: 8 }}>
+            System follows the light or dark setting of your device.
           </Text>
         </View>
 
         {SECTIONS.map((section, sIndex) => (
           <View key={section.title ?? `section-${sIndex}`}>
-            {section.title ? (
-              <Text
-                style={{
-                  fontFamily: 'Manrope_700Bold',
-                  fontSize: 12,
-                  color: colors.ink3,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.6,
-                  paddingHorizontal: 4,
-                  marginBottom: 8,
-                }}
-              >
-                {section.title}
-              </Text>
-            ) : null}
+            {section.title ? <SectionTitle>{section.title}</SectionTitle> : null}
             <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.row }}>
               {section.rows.map((row, index) => (
                 <Pressable
@@ -115,9 +104,9 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
                   <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.blue100, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name={row.icon} size={16} color={colors.blue600} />
                   </View>
-                  <Text style={{ flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 14.5, color: colors.ink }}>{row.label}</Text>
+                  <Text style={{ flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: colors.ink }}>{row.label}</Text>
                   {row.badge ? (
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12.5, color: colors.green600 }}>{row.badge}</Text>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.green600 }}>{row.badge}</Text>
                   ) : null}
                   <Icon name="chevronRight" size={16} color={colors.ink4} />
                 </Pressable>
@@ -127,5 +116,25 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
         ))}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function SectionTitle({ children }: { children: string }) {
+  const colors = useColors();
+  return (
+    <Text
+      accessibilityRole="header"
+      style={{
+        fontFamily: 'Manrope_700Bold',
+        fontSize: 12,
+        color: colors.ink3,
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        paddingHorizontal: 4,
+        marginBottom: 8,
+      }}
+    >
+      {children}
+    </Text>
   );
 }

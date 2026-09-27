@@ -6,7 +6,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.sugarsense.app"
@@ -27,7 +27,19 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SugarSense needs camera access to photograph your meals for carb estimation."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SugarSense needs photo library access so you can pick an existing meal photo."
+        }
+      ]
     ]
   }
 }

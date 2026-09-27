@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Circle, Line, Path, Polyline, Rect } from 'react-native-svg';
+import { useColors } from '../theme';
 
 export type IconName =
   | 'home'
@@ -29,6 +30,7 @@ export type IconName =
   | 'close'
   | 'flash'
   | 'flipCamera'
+  | 'refresh'
   | 'trendUp'
   | 'trendDown'
   | 'wifi';
@@ -40,7 +42,9 @@ type Props = {
   strokeWidth?: number;
 };
 
-export function Icon({ name, size = 24, color = '#16213D', strokeWidth = 1.8 }: Props) {
+export function Icon({ name, size = 24, color: colorProp, strokeWidth = 1.8 }: Props) {
+  const colors = useColors();
+  const color = colorProp ?? colors.ink;
   const common = {
     fill: 'none' as const,
     stroke: color,
@@ -246,6 +250,14 @@ export function Icon({ name, size = 24, color = '#16213D', strokeWidth = 1.8 }: 
           <Path d="M4 9a8 8 0 0 1 13.5-4.5M20 15a8 8 0 0 1-13.5 4.5" {...common} />
           <Polyline points="17 3 17.5 4.5 16 5" {...common} />
           <Polyline points="7 21 6.5 19.5 8 19" {...common} />
+        </Svg>
+      );
+    case 'refresh':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M4 11a8 8 0 0 1 14-5.3M20 13a8 8 0 0 1-14 5.3" {...common} />
+          <Polyline points="17.5 3.5 18 6.2 15.3 6.5" {...common} />
+          <Polyline points="6.5 20.5 6 17.8 8.7 17.5" {...common} />
         </Svg>
       );
     case 'trendUp':

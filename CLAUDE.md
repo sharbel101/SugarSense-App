@@ -304,6 +304,57 @@ model_version, prompt_version }`. **`total_carbs_sigma` is the point of the subs
   It is a noisy preference signal, not a weighing.
 - Extract fat + protein to choose the absorption profile (late 3-5 h rise), not to show calories.
 
+### Guided two-photo capture (UX spec - design decision 2026-09-22, NOT implemented yet)
+
+Goal: get a consistent **top-down** view and a **~45 degree oblique** view (PDF Sec 5.3) without the user having to
+judge angles. The phone's orientation sensors guide the user and take each photo automatically at the right
+angle. One photo or two are both allowed; the second photo is optional. This replaces the static mock camera
+screen (`mobile/src/screens/scan/CameraScreen.tsx`).
+
+**Flow**
+1. Tips (skippable): whole plate in frame, a bank card beside the plate as scale reference, good light.
+2. **Photo 1 - top-down.** The user holds the phone flat above the plate, camera pointing straight down. A level
+   indicator (crosshair + bubble) shows the tilt; when the phone is level and steady the app takes the photo by
+   itself (haptic + shutter animation + thumbnail).
+3. **Transition.** An arc of dots and an arrow show the path from "pointing down" to the side angle. The user tilts
+   the phone along the dots; a light haptic tick fires as each dot is passed and the on-screen progress fills.
+4. **Photo 2 - oblique.** When the camera reaches the target angle and is steady, the app takes the photo by itself
+   (stronger haptic + shutter animation).
+5. **Review.** Both thumbnails with "retake" per photo; "skip side photo" (single-photo mode) is always available.
+   Then upload for analysis; results go to the normal meal-review screen (editable items).
+
+**Angle logic** (all thresholds are STARTING VALUES to tune on real devices; keep them in one config):
+- *Camera elevation* = angle of the camera's viewing axis above/below the horizontal, derived from the gravity
+  vector / device attitude. Top-down target: pointing straight down (90 deg from horizontal), tolerance +/-5 deg.
+  Oblique target: ~45 deg (PDF), tolerance +/-5 deg.
+- Auto-capture fires only when the angle is inside tolerance AND the angular speed is below a threshold AND that has
+  held for a short dwell (~300-500 ms). This prevents motion blur and accidental shots.
+- A manual shutter button is always present; auto-capture can be turned off; if nothing is captured within ~15 s the
+  UI hints "tap to capture". Never block the user: capture failure -> manual entry (PDF Sec 5.2 / 14.2).
+- Orientation sensors give tilt, **not position**: they cannot know the phone's distance or height. Use an
+  on-screen plate frame guide, and let the server judge framing (plate visible and whole, blur, exposure) and ask
+  for a retake when needed.
+
+**Feedback states** (visual + haptic; add voice cues for accessibility): grey = far from the target angle, amber =
+close, green = in range and steady, then capture. Text prompt per step ("Hold flat above the plate", "Tilt down
+slowly along the dots", "Hold steady").
+
+**Data sent with each photo** (for the server geometry stage): capture time, camera elevation angle (plus roll and
+the gravity vector), angular speed at capture, auto vs manual capture, retake count, image size, device model, EXIF
+(focal length) when available, whether a reference object was declared, and optionally a depth map (LiDAR/ARCore)
+in future. The server uses the angles for geometry (PDF Sec 5.3) and records single-photo / no-reference cases to
+widen `total_carbs_sigma` (PDF Sec 5.4).
+
+**Building blocks** (expected to be available in Expo Go, so it can be tested on a phone before any dev build -
+verify against the SDK 57 docs): camera capture (`expo-camera`), orientation/motion sensors (`expo-sensors`
+DeviceMotion), haptics (`expo-haptics`). Expo Web has no reliable sensors: fall back to manual capture there. Keep
+the angle maths and the capture state machine as **pure functions** (no UI) so they can be unit-tested with
+recorded sensor traces.
+
+**Validation:** measure real photo angles vs the intended 90/45 deg, time to capture, auto-capture success rate and
+retake rate on several devices; then prove the accuracy benefit with the weighed-meal benchmark (1 photo vs 2
+photos vs + reference card vs + depth; PDF Sec 11 / section 15 phase 3). Keep it only if it measurably helps.
+
 ## 10. Bolus calculator (PDF Sec 12.2)
 
 ```
@@ -478,6 +529,8 @@ Conventions for contributors (human or AI):
   evaluation, no regulatory status, research-grade hypo model) visible in user-facing "About".
 - Secrets/credentials never in git (`.env*` is gitignored; commit `.env.example` only).
 - Do not touch or import the unrelated Garmin/GlucoGuard projects.
+- Frontend UI/UX follows `mobile/docs/MOBILE_UIUX_FRONTEND_AI_GUIDE.md`, as applied to React Native in
+  `mobile/docs/UIUX_COMPLIANCE.md`. Section 2 of this file wins on any conflict.
 
 ### Open decisions (ask the user, then record the answer here)
 
@@ -503,6 +556,7 @@ All commands run from the named folder. Windows, Node >= 22.13, Python 3.12.
 | `mobile/` | `npm run android` | build + install the dev build on a connected phone, start Metro (**not built yet**) |
 | `mobile/` | `npm start` | Metro for an already-installed dev build (`--dev-client`) |
 | `mobile/` | `npm run typecheck` / `npm run lint` / `npm run doctor` | tsc / ESLint / expo-doctor |
+| `mobile/` | `npm run check:contrast` | WCAG AA check of the light and dark palettes (needs Node >= 22.6; exits 1 on any miss) |
 | `backend/` | `npm install` | install deps |
 | `backend/` | `npm start` / `npm run start:dev` | start Nest (port from `PORT`, default 3000) / watch mode |
 | `backend/` | `npm run typecheck` / `npm run lint` / `npm test` / `npm run test:e2e` / `npm run build` | checks |

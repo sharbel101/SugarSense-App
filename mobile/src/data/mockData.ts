@@ -140,15 +140,6 @@ export const wearableAttention = { hr: 88, hrv: 31, movement: 'Elevated', covera
 
 export const latestMeal = { name: 'Chicken + rice', carbs: 54, timeAgo: '25 min ago' };
 
-export const detectedItems = [
-  { name: 'Rice', carbs: 42 },
-  { name: 'Chicken', carbs: 0 },
-  { name: 'Sauce', carbs: 8 },
-  { name: 'Vegetables', carbs: 4 },
-];
-
-export const carbEstimate = { grams: 54, confidence: 'High' as const };
-
 export const bolusSuggestion = {
   units: 4.5,
   breakdown: [

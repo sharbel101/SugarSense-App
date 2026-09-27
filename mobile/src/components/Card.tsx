@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleProp, View, ViewStyle } from 'react-native';
-import { colors, radius, shadow } from '../theme';
+import { radius, shadow, useColors } from '../theme';
 
 type Point = { x: number; y: number };
 
@@ -13,6 +13,7 @@ type Props = {
 };
 
 export function Card({ children, style, onPress, elevated, accessibilityLabel }: Props) {
+  const colors = useColors();
   const base = [
     {
       backgroundColor: colors.surface,

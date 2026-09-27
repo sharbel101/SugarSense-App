@@ -1,11 +1,13 @@
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { CapturedPhoto } from '../api/mealsApi';
+import { ConfirmedMeal } from '../services/mealService';
 
 export type ScanStackParamList = {
   Camera: undefined;
-  MealReview: undefined;
-  PostMeal: undefined;
+  MealReview: { photo: CapturedPhoto };
+  PostMeal: { meal: ConfirmedMeal };
 };
 
 export type TabParamList = {

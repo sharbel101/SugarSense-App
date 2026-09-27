@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 
 export type ChartPoint = { x: number; y: number };
 
@@ -15,6 +15,8 @@ type Props = {
   highlightPoint?: ChartPoint;
   gridLinesY?: number[];
   height?: number;
+  /** Text alternative for screen readers - describe the trend and the range, not exact values. */
+  accessibilityLabel: string;
 };
 
 function toPoints(points: ChartPoint[]) {
@@ -36,11 +38,13 @@ export function GlucoseChart({
   highlightPoint,
   gridLinesY = [],
   height,
+  accessibilityLabel,
 }: Props) {
+  const colors = useColors();
   const lastActual = actual[actual.length - 1];
 
   return (
-    <View>
+    <View accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel}>
       <Svg
         width="100%"
         height={height ?? viewBoxHeight}

@@ -1,13 +1,14 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { CustomTabBar } from '../components/CustomTabBar';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { PredictScreen } from '../screens/PredictScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SafetyScreen } from '../screens/SafetyScreen';
+import { useTheme } from '../theme';
 import { ScanNavigator } from './ScanNavigator';
 import { RootStackParamList, TabParamList } from './types';
 
@@ -46,8 +47,25 @@ function Tabs() {
 }
 
 export function RootNavigator() {
+  const { isDark, colors } = useTheme();
+  // Scene backgrounds and transitions read the navigation theme, so it must follow ours.
+  const navTheme = useMemo(() => {
+    const base = isDark ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: colors.blue600,
+        background: colors.ground,
+        card: colors.surface,
+        text: colors.ink,
+        border: colors.border,
+      },
+    };
+  }, [isDark, colors]);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navTheme}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         <RootStack.Screen name="Tabs" component={Tabs} />
         <RootStack.Screen

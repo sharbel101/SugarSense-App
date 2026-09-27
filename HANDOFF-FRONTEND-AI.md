@@ -70,3 +70,15 @@ BLE library not yet formally locked in (react-native-ble-plx is the likely pick,
 ## 5. What to hand the front-end AI, concretely
 
 Point it at `CLAUDE.md` first, full stop — it is long but is the actual spec (data model, safety rules, UI copy table, simulator equations, build order). Then: `mobile/src` is empty and waiting for real screens; `test-APP/` is a look-and-feel reference only; BLE work is blocked on picking/installing a library and needs an EAS dev-client build (not Expo Go) plus a real Android device to test against; the HealthyPi Move's GATT UUIDs above are ready to use directly.
+
+---
+
+## 6. New design decision (2026-09-22): guided two-photo meal capture
+
+The Scan flow must guide the user to take two photos - **top-down**, then a **~45 degree side view** - using the phone's
+orientation sensors: a level indicator, an arc of dots/arrow to follow, haptic ticks, and **automatic capture** when the
+angle is right and the phone is steady (manual shutter always available; the second photo is optional). The full spec
+(flow, angle logic, feedback states, metadata sent with each photo, validation) is in `CLAUDE.md` section 9, "Guided
+two-photo capture". It replaces the static `CameraScreen` in the prototype. Not implemented yet; keep the angle maths
+and capture state machine as pure, unit-testable functions. The meal analysis itself runs on the server (Gemini on the
+VM), not in the app.

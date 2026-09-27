@@ -7,7 +7,8 @@ import { Chip } from '../components/Chip';
 import { GlucoseChart } from '../components/GlucoseChart';
 import { Icon } from '../components/Icon';
 import { currentGlucose, homeChart, latestMeal, wearableNormal } from '../data/mockData';
-import { colors, radius, spacing } from '../theme';
+import { manualConfirmedMeal } from '../services/mealService';
+import { radius, spacing, useColors } from '../theme';
 import { TabScreenProps } from '../navigation/types';
 
 function greeting() {
@@ -18,6 +19,7 @@ function greeting() {
 }
 
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
+  const colors = useColors();
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
@@ -33,7 +35,9 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
         }}
       >
         <View>
-          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 20, color: colors.ink }}>{greeting()}</Text>
+          <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 20, color: colors.ink }}>
+            {greeting()}
+          </Text>
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, marginTop: 2 }}>
             {today}
           </Text>
@@ -49,7 +53,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
             <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 56, color: colors.ink, letterSpacing: -1.5 }}>
               {currentGlucose.value}
             </Text>
-            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 17, color: colors.ink2, marginBottom: 9 }}>
+            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>
               {currentGlucose.unit}
             </Text>
             <View style={{ marginLeft: 'auto', marginBottom: 6 }}>
@@ -58,7 +62,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
             <Chip label={currentGlucose.statusLabel} bg={colors.green100} color={colors.green600} />
-            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13.5, color: colors.ink2 }}>
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
               {currentGlucose.contextLabel}
             </Text>
           </View>
@@ -73,6 +77,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
               nowX={homeChart.nowX}
               gridLinesY={homeChart.gridLinesY}
               height={130}
+              accessibilityLabel="Glucose over the last 3 hours, with a shaded predicted range for the next 2 hours"
             />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2, marginTop: 2 }}>
               {homeChart.axisLabels.map((label) => (
@@ -96,7 +101,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
             </IconChip>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Safety</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2, marginTop: 1 }}>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
                 No increased low-risk signal detected.
               </Text>
             </View>
@@ -104,14 +109,24 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
         </Card>
 
-        <Card onPress={() => navigation.navigate('Scan', { screen: 'PostMeal' })} accessibilityLabel="View latest meal">
+        <Card
+          // "Latest meal" has no real history store yet (out of scope here) - this still just
+          // reopens the mock summary below, now carrying the ConfirmedMeal shape PostMeal expects.
+          onPress={() =>
+            navigation.navigate('Scan', {
+              screen: 'PostMeal',
+              params: { meal: { ...manualConfirmedMeal(latestMeal.carbs), label: latestMeal.name } },
+            })
+          }
+          accessibilityLabel="View latest meal"
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconChip bg={colors.amber100}>
               <Icon name="fork" size={19} color={colors.amber600} />
             </IconChip>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Latest meal</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2, marginTop: 1 }}>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
                 {latestMeal.name} · Est. {latestMeal.carbs}g carbs
               </Text>
             </View>
@@ -130,7 +145,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                 <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green600 }} />
                 <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: colors.green600 }}>Connected</Text>
               </View>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2, marginTop: 1 }}>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
                 HR {wearableNormal.hr} bpm · Data quality good
               </Text>
             </View>
@@ -159,6 +174,7 @@ function IconChip({ bg, children }: { bg: string; children: React.ReactNode }) {
 }
 
 function LegendDot({ color, label, dashed, faint }: { color: string; label: string; dashed?: boolean; faint?: boolean }) {
+  const colors = useColors();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <View
