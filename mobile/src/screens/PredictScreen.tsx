@@ -1,30 +1,39 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
-import { GhostButton } from '../components/Buttons';
 import { GlucoseChart } from '../components/GlucoseChart';
-import { Icon, IconName } from '../components/Icon';
-import { advancedForecastDetails, currentGlucose, forecastFactors, predictChart } from '../data/mockData';
+import { GlucoseStatus } from '../components/GlucoseStatus';
 import { TabScreenProps } from '../navigation/types';
-import { ColorPalette, radius, spacing, useColors } from '../theme';
+import { buildGlucoseChart } from '../services/glucoseChart';
+import { formatAge, formatClock } from '../services/glucoseState';
+import { useGlucose } from '../services/GlucoseProvider';
+import { spacing, useColors } from '../theme';
 
-function factorPalette(colors: ColorPalette): Record<string, { bg: string; fg: string }> {
-  return {
-    blue: { bg: colors.blue100, fg: colors.blue600 },
-    amber: { bg: colors.amber100, fg: colors.amber600 },
-    purple: { bg: colors.purple100, fg: colors.purple600 },
-    green: { bg: colors.green100, fg: colors.green600 },
-  };
-}
+const FORECAST_MARKS = [30, 60, 120] as const;
 
 export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
   const colors = useColors();
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const { tooltip } = predictChart;
-  const tooltipLeftPct = (predictChart.highlightPoint.x / predictChart.viewBoxWidth) * 100;
+  const { view, refresh, refreshing } = useGlucose();
+  const data = view.kind === 'ok' ? view.data : null;
+  const chart = useMemo(() => (data ? buildGlucoseChart(data) : null), [data]);
+
+  // Forecast value nearest each mark (the endpoint emits every 5 min up to +120).
+  const marks = useMemo(() => {
+    if (!data || !data.forecastAvailable) return [];
+    const t0 = Date.parse(data.measuredAt);
+    return FORECAST_MARKS.flatMap((m) => {
+      const target = t0 + m * 60000;
+      let best: { dt: number; value: number } | null = null;
+      for (const p of data.predictions) {
+        const dt = Math.abs(Date.parse(p.time) - target);
+        if (best === null || dt < best.dt) best = { dt, value: p.value };
+      }
+      return best && best.dt <= 5 * 60000 ? [{ minutes: m, value: best.value }] : [];
+    });
+  }, [data]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>
@@ -44,105 +53,115 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-          <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 30, color: colors.ink }}>{currentGlucose.value}</Text>
-          <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink2 }}>mg/dL · steady · now</Text>
-        </View>
-
-        <Card elevated>
-          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Your forecast
-          </Text>
-          <View style={{ marginTop: 6, position: 'relative' }}>
-            <GlucoseChart
-              viewBoxWidth={predictChart.viewBoxWidth}
-              viewBoxHeight={predictChart.viewBoxHeight}
-              actual={predictChart.actual}
-              predicted={predictChart.predicted}
-              band={predictChart.band}
-              nowX={predictChart.nowX}
-              highlightPoint={predictChart.highlightPoint}
-              gridLinesY={predictChart.gridLinesY}
-              height={predictChart.viewBoxHeight}
-              accessibilityLabel="Predicted glucose range for the next 2 hours. The shaded band shows the uncertainty and widens further out."
-            />
-            <View
-              style={{
-                position: 'absolute',
-                left: `${tooltipLeftPct + 4}%`,
-                top: 4,
-                backgroundColor: colors.ink,
-                borderRadius: 14,
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                width: 152,
-              }}
-            >
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.onInk }}>{tooltip.minutes} minutes</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.onInk2, marginTop: 2 }}>
-                Median: {tooltip.median} mg/dL
+        {view.kind === 'ok' && data && chart ? (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 30, color: colors.ink }}>
+                {Math.round(data.glucoseMgdl)}
               </Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.onInk2 }}>
-                Range: {tooltip.low}–{tooltip.high} mg/dL
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink2 }}>
+                mg/dL · updated {formatAge(view.ageMinutes)} · measured {formatClock(data.measuredAt)}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2, marginTop: 4 }}>
-              {predictChart.axisLabels.map((label) => (
-                <Text key={label} style={{ fontFamily: 'Manrope_500Medium', fontSize: 11, color: colors.ink3 }}>
-                  {label}
-                </Text>
-              ))}
-            </View>
-          </View>
-          <GhostButton
-            label="Why this forecast?"
-            onPress={() => setShowAdvanced((v) => !v)}
-            icon={<Icon name="chevronDown" size={14} color={colors.blue600} />}
-          />
-        </Card>
-
-        <Chip label="Prediction confidence: High" bg={colors.blue100} color={colors.blue600} />
-
-        <Card style={{ padding: 6 }}>
-          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 }}>
-            Why this forecast?
-          </Text>
-          {forecastFactors.map((factor) => (
-            <FactorRow key={factor.label} icon={factor.icon} bg={factor.bg} label={factor.label} value={factor.value} />
-          ))}
-
-          <View style={{ borderTopWidth: 1, borderTopColor: colors.divider, paddingHorizontal: 12, paddingBottom: 2 }}>
-            <GhostButton
-              label={showAdvanced ? 'Hide advanced details' : 'Advanced details'}
-              onPress={() => setShowAdvanced((v) => !v)}
-            />
-            {showAdvanced ? (
-              <View style={{ backgroundColor: colors.ground, borderRadius: radius.row, padding: 14, marginTop: 6 }}>
-                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>
-                  {advancedForecastDetails}
-                </Text>
-              </View>
+            {view.refreshFailed ? (
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.amberDark }}>
+                Couldn&apos;t refresh - showing the previous reading.
+              </Text>
             ) : null}
-          </View>
-        </Card>
+
+            <Card elevated>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Predicted range · next 2 hours
+              </Text>
+              <View style={{ marginTop: 6 }}>
+                <GlucoseChart
+                  viewBoxWidth={chart.viewBoxWidth}
+                  viewBoxHeight={chart.viewBoxHeight}
+                  actual={chart.actual}
+                  predicted={chart.predicted}
+                  band={chart.band}
+                  nowX={chart.nowX}
+                  gridLinesY={chart.gridLinesY}
+                  xTicks={chart.xTicks}
+                  yTicks={chart.yTicks}
+                  height={chart.viewBoxHeight}
+                  accessibilityLabel={
+                    chart.hasForecast
+                      ? chart.hasBand
+                        ? 'Glucose over the last hour with a forecast line for the next 2 hours and an estimated range for the next 45 minutes.'
+                        : 'Glucose over the last hour with a forecast line for the next 2 hours. No range is available.'
+                      : 'Glucose over the last hour. No forecast is available.'
+                  }
+                />
+              </View>
+              {chart.hasForecast ? (
+                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
+                  {chart.hasBand
+                    ? 'The shaded band is an estimated range for the next 45 minutes. Beyond that only the forecast line is available, with no range.'
+                    : 'No range was provided, so only the forecast line is shown. It is an estimate, not a range of likely values.'}
+                </Text>
+              ) : (
+                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
+                  Forecast unavailable
+                  {data.forecastUnavailableReason ? `: ${data.forecastUnavailableReason}` : '.'}
+                </Text>
+              )}
+            </Card>
+
+            {chart.hasBand && data.rangesAreShadow ? (
+              <Chip label="Estimated ranges: shadow mode, not validated" bg={colors.amber100} color={colors.amberDark} />
+            ) : null}
+
+            {data.ranges ? (
+              <Card>
+                <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Estimated ranges</Text>
+                {data.ranges.map((r) => (
+                  <View key={r.minutes} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>
+                      In {r.minutes} min
+                    </Text>
+                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
+                      {Math.round(r.low)}–{Math.round(r.high)} mg/dL
+                    </Text>
+                  </View>
+                ))}
+              </Card>
+            ) : null}
+
+            {marks.length > 0 ? (
+              <Card>
+                <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Forecast line</Text>
+                {marks.map((m) => (
+                  <View key={m.minutes} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>
+                      In {m.minutes} min
+                    </Text>
+                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
+                      {Math.round(m.value)} mg/dL
+                    </Text>
+                  </View>
+                ))}
+                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
+                  A single forecast value is an estimate and can be wrong. It carries no range beyond 45 minutes.
+                </Text>
+              </Card>
+            ) : null}
+
+            <Card>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>About this forecast</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6, lineHeight: 21 }}>
+                Estimates only. Not medical advice.
+                {data.modelVersion ? ` Model ${data.modelVersion}.` : ''}
+                {data.generatedAt ? ` Generated at ${formatClock(data.generatedAt)}.` : ''}
+              </Text>
+            </Card>
+          </>
+        ) : view.kind === 'ok' ? null : (
+          <Card elevated>
+            <GlucoseStatus view={view} onRetry={refresh} retrying={refreshing} />
+          </Card>
+        )}
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function FactorRow({ icon, bg, label, value }: { icon: IconName; bg: string; label: string; value: string }) {
-  const colors = useColors();
-  const palettes = factorPalette(colors);
-  const palette = palettes[bg] ?? palettes.blue;
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 9 }}>
-      <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: palette.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={icon} size={15} color={palette.fg} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{label}</Text>
-        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink2 }}>{value}</Text>
-      </View>
-    </View>
   );
 }

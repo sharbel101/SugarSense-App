@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { Text, View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
 import { useColors } from '../theme';
 
@@ -14,6 +14,9 @@ type Props = {
   nowX?: number;
   highlightPoint?: ChartPoint;
   gridLinesY?: number[];
+  /** Real-scale axis labels (fractions of the chart width / height). Optional; mock charts omit them. */
+  xTicks?: { frac: number; label: string }[];
+  yTicks?: { frac: number; label: string }[];
   height?: number;
   /** Text alternative for screen readers - describe the trend and the range, not exact values. */
   accessibilityLabel: string;
@@ -37,6 +40,8 @@ export function GlucoseChart({
   nowX,
   highlightPoint,
   gridLinesY = [],
+  xTicks,
+  yTicks,
   height,
   accessibilityLabel,
 }: Props) {
@@ -105,6 +110,51 @@ export function GlucoseChart({
           />
         ) : null}
       </Svg>
+
+      {yTicks && yTicks.length > 0 ? (
+        <View pointerEvents="none" style={{ position: 'absolute', left: 2, top: 0, right: 0, height: height ?? viewBoxHeight }}>
+          {yTicks.map((t) => (
+            <Text
+              key={t.label}
+              style={{
+                position: 'absolute',
+                top: `${t.frac * 100}%`,
+                marginTop: -15,
+                fontFamily: 'Manrope_500Medium',
+                fontSize: 11,
+                color: colors.ink3,
+              }}
+            >
+              {t.label}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+
+      {xTicks && xTicks.length > 0 ? (
+        <View style={{ height: 18, marginTop: 4 }}>
+          {xTicks.map((t) => (
+            <Text
+              key={t.label}
+              style={{
+                position: 'absolute',
+                top: 0,
+                width: 64,
+                fontFamily: 'Manrope_500Medium',
+                fontSize: 11,
+                color: colors.ink3,
+                ...(t.frac < 0.08
+                  ? { left: 0, textAlign: 'left' as const }
+                  : t.frac > 0.92
+                    ? { right: 0, textAlign: 'right' as const }
+                    : { left: `${t.frac * 100}%`, marginLeft: -32, textAlign: 'center' as const }),
+              }}
+            >
+              {t.label}
+            </Text>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

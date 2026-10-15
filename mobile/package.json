@@ -43,6 +43,7 @@
     "prebuild": "expo prebuild",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
+    "test:glucose": "node --no-warnings --experimental-strip-types --test tests/glucose.test.mjs",
     "check:contrast": "node --no-warnings --experimental-strip-types scripts/check-contrast.mjs",
     "doctor": "expo-doctor",
     "start:tunnel": "expo start --go --tunnel"

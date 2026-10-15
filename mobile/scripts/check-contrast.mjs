@@ -48,6 +48,7 @@ const PAIRS = [
   ['dark green on green tint (safety card)', 'greenDark', 'green100', TEXT],
   ['dark green 2 on green tint (safety card)', 'greenDark2', 'green100', TEXT],
   ['amber text on amber tint', 'amberDark', 'amber100', TEXT],
+  ['amber text on surface (refresh-failed note)', 'amberDark', 'surface', TEXT],
   ['amber icon on amber tint', 'amber600', 'amber100', GRAPHIC],
   ['purple text on purple tint (chips)', 'purple600', 'purple100', TEXT],
   ['purple text on surface', 'purple600', 'surface', TEXT],

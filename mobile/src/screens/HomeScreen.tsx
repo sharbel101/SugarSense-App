@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { GlucoseChart } from '../components/GlucoseChart';
+import { GlucoseStatus } from '../components/GlucoseStatus';
 import { Icon } from '../components/Icon';
-import { currentGlucose, homeChart, latestMeal, wearableNormal } from '../data/mockData';
+import { latestMeal, wearableNormal } from '../data/mockData';
+import { buildGlucoseChart } from '../services/glucoseChart';
+import { summariseRisk } from '../services/glucoseRisk';
+import { formatAge, formatClock } from '../services/glucoseState';
+import { useGlucose } from '../services/GlucoseProvider';
 import { manualConfirmedMeal } from '../services/mealService';
 import { radius, spacing, useColors } from '../theme';
 import { TabScreenProps } from '../navigation/types';
@@ -20,6 +25,10 @@ function greeting() {
 
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const colors = useColors();
+  const { view, refresh, refreshing } = useGlucose();
+  const okData = view.kind === 'ok' ? view.data : null;
+  const chart = useMemo(() => (okData ? buildGlucoseChart(okData) : null), [okData]);
+  const risk = useMemo(() => (okData ? summariseRisk(okData) : null), [okData]);
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
@@ -49,63 +58,86 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
         contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}
       >
         <Card elevated>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-            <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 56, color: colors.ink, letterSpacing: -1.5 }}>
-              {currentGlucose.value}
-            </Text>
-            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>
-              {currentGlucose.unit}
-            </Text>
-            <View style={{ marginLeft: 'auto', marginBottom: 6 }}>
-              <Icon name="trending" size={24} color={colors.green600} />
-            </View>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <Chip label={currentGlucose.statusLabel} bg={colors.green100} color={colors.green600} />
-            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
-              {currentGlucose.contextLabel}
-            </Text>
-          </View>
-
-          <View style={{ marginTop: 18 }}>
-            <GlucoseChart
-              viewBoxWidth={homeChart.viewBoxWidth}
-              viewBoxHeight={homeChart.viewBoxHeight}
-              actual={homeChart.actual}
-              predicted={homeChart.predicted}
-              band={homeChart.band}
-              nowX={homeChart.nowX}
-              gridLinesY={homeChart.gridLinesY}
-              height={130}
-              accessibilityLabel="Glucose over the last 3 hours, with a shaded predicted range for the next 2 hours"
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2, marginTop: 2 }}>
-              {homeChart.axisLabels.map((label) => (
-                <Text key={label} style={{ fontFamily: 'Manrope_500Medium', fontSize: 11, color: colors.ink3 }}>
-                  {label}
+          {view.kind === 'ok' && okData && chart ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+                <Text
+                  accessibilityLabel={`${Math.round(okData.glucoseMgdl)} milligrams per decilitre`}
+                  style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 56, color: colors.ink, letterSpacing: -1.5 }}
+                >
+                  {Math.round(okData.glucoseMgdl)}
                 </Text>
-              ))}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 10 }}>
-              <LegendDot color={colors.blue700} label="Actual" />
-              <LegendDot color={colors.blue500} label="Predicted" dashed />
-              <LegendDot color={colors.blue500} label="Uncertainty" faint />
-            </View>
-          </View>
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>
+                  mg/dL
+                </Text>
+              </View>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 4 }}>
+                Updated {formatAge(view.ageMinutes)} · measured {formatClock(okData.measuredAt)}
+              </Text>
+              {view.refreshFailed ? (
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.amberDark, marginTop: 4 }}>
+                  Couldn&apos;t refresh - showing the previous reading.
+                </Text>
+              ) : null}
+
+              <View style={{ marginTop: 18 }}>
+                <GlucoseChart
+                  viewBoxWidth={chart.viewBoxWidth}
+                  viewBoxHeight={chart.viewBoxHeight}
+                  actual={chart.actual}
+                  predicted={chart.predicted}
+                  band={chart.band}
+                  nowX={chart.nowX}
+                  gridLinesY={chart.gridLinesY}
+                  xTicks={chart.xTicks}
+                  yTicks={chart.yTicks}
+                  height={150}
+                  accessibilityLabel={
+                    chart.hasForecast
+                      ? `Glucose over the last hour with the forecast for the next 2 hours. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre.`
+                      : `Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre. No forecast available.`
+                  }
+                />
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginTop: 10 }}>
+                  <LegendDot color={colors.blue700} label="Measured" />
+                  {chart.hasForecast ? <LegendDot color={colors.blue500} label="Forecast" dashed /> : null}
+                  {chart.hasBand ? (
+                    <LegendDot
+                      color={colors.blue500}
+                      label={okData.rangesAreShadow ? 'Estimated range (not validated)' : 'Estimated range'}
+                      faint
+                    />
+                  ) : null}
+                </View>
+                {!chart.hasForecast ? (
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 8 }}>
+                    Forecast unavailable
+                    {okData.forecastUnavailableReason ? `: ${okData.forecastUnavailableReason}` : '.'}
+                  </Text>
+                ) : null}
+              </View>
+            </>
+          ) : view.kind === 'ok' ? null : (
+            <GlucoseStatus view={view} onRetry={refresh} retrying={refreshing} />
+          )}
         </Card>
 
         <Card onPress={() => navigation.navigate('Safety')} accessibilityLabel="Open Safety">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconChip bg={colors.green100}>
-              <Icon name="shield" size={19} color={colors.green600} />
+            <IconChip bg={risk?.alerting ? colors.amber100 : colors.blue100}>
+              <Icon
+                name={risk?.alerting ? 'alertTriangle' : 'shield'}
+                size={19}
+                color={risk?.alerting ? colors.amber600 : colors.blue600}
+              />
             </IconChip>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Safety</Text>
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                No increased low-risk signal detected.
+                {risk ? risk.lines.join(' ') : 'Risk signal unavailable without a recent reading.'}
               </Text>
             </View>
-            <Chip label="Low risk" bg={colors.green100} color={colors.green600} size="sm" />
+            {risk?.alerting ? <Chip label="Alert" bg={colors.amber100} color={colors.amberDark} size="sm" /> : null}
           </View>
         </Card>
 
