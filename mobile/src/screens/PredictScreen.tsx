@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { GlucoseChart } from '../components/GlucoseChart';
 import { GlucoseStatus } from '../components/GlucoseStatus';
+import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { TabScreenProps } from '../navigation/types';
 import { buildGlucoseChart } from '../services/glucoseChart';
 import { formatAge, formatClock } from '../services/glucoseState';
@@ -52,7 +53,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 16 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 16 }}>
         {view.kind === 'ok' && data && chart ? (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -161,7 +162,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
             <GlucoseStatus view={view} onRetry={refresh} retrying={refreshing} />
           </Card>
         )}
-      </ScrollView>
+      </PullToRefreshScrollView>
     </SafeAreaView>
   );
 }

@@ -1,16 +1,19 @@
 import React from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { GhostButton } from '../components/Buttons';
 import { Icon } from '../components/Icon';
+import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { insights } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
+import { useGlucose } from '../services/GlucoseProvider';
 import { spacing, useColors } from '../theme';
 
 export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
   const colors = useColors();
+  const { refresh, refreshing } = useGlucose();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>
       <View
@@ -31,7 +34,7 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
         What SugarSense is learning about you
       </Text>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
         {insights.map((item) => (
           <Card key={item.title}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -48,7 +51,7 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
             />
           </Card>
         ))}
-      </ScrollView>
+      </PullToRefreshScrollView>
     </SafeAreaView>
   );
 }

@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { Icon } from '../components/Icon';
+import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { safetyAttention, safetyNormal, wearableAttention, wearableNormal } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
+import { useGlucose } from '../services/GlucoseProvider';
 import { radius, spacing, useColors } from '../theme';
 
 type Severity = 'normal' | 'attention';
 
 export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
   const colors = useColors();
+  const { refresh, refreshing } = useGlucose();
   const [severity, setSeverity] = useState<Severity>('normal');
 
   return (
@@ -37,7 +40,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
         <SeveritySwitch value={severity} onChange={setSeverity} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
         {severity === 'normal' ? (
           <View style={{ backgroundColor: colors.green100, borderRadius: radius.hero, padding: 22, gap: 10 }}>
             <IconBadge>
@@ -146,7 +149,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
             Wearable context is contributing to your risk assessment.
           </Text>
         </Card>
-      </ScrollView>
+      </PullToRefreshScrollView>
     </SafeAreaView>
   );
 }

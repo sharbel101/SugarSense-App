@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import { ngrokBypassHeaders } from './requestHeaders';
 
 /**
  * Meal-photo analysis client. Talks to the backend's `POST /meals/analyze` only - the mobile app
@@ -116,7 +117,7 @@ export async function analyzeMeal(
   try {
     response = await fetch(`${API_URL}/meals/analyze`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...ngrokBypassHeaders(API_URL) },
       body,
       signal: options?.signal,
     });

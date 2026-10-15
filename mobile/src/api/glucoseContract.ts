@@ -228,6 +228,8 @@ export async function fetchGlucoseFrom(
   baseUrl: string,
   signal?: AbortSignal,
   fetchImpl: typeof fetch = fetch,
+  /** Transport-only headers (e.g. the ngrok interstitial bypass). Never credentials or health data. */
+  extraHeaders: Record<string, string> = {},
 ): Promise<GlucoseFetchOutcome> {
   const controller = new AbortController();
   let timedOut = false;
@@ -244,7 +246,7 @@ export async function fetchGlucoseFrom(
   try {
     const res = await fetchImpl(`${baseUrl}/glucose`, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...extraHeaders },
       cache: 'no-store',
       signal: controller.signal,
     });

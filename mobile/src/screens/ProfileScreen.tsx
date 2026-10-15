@@ -1,11 +1,13 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BackButton } from '../components/Buttons';
 import { Icon, IconName } from '../components/Icon';
+import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { RootStackParamList } from '../navigation/types';
+import { useGlucose } from '../services/GlucoseProvider';
 import { radius, spacing, ThemePreference, useColors, useTheme } from '../theme';
 
 type Row = { icon: IconName; label: string; badge?: string };
@@ -46,6 +48,7 @@ const SECTIONS: { title?: string; rows: Row[] }[] = [
 
 export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
   const { colors, preference, setPreference } = useTheme();
+  const { refresh, refreshing } = useGlucose();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
       <View
@@ -63,7 +66,7 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxxl, gap: 20 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxxl, gap: 20 }}>
         <View style={{ alignItems: 'center', gap: 8, paddingVertical: 8 }}>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: colors.blue100, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="person" size={32} color={colors.blue600} strokeWidth={1.6} />
@@ -114,7 +117,7 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
             </View>
           </View>
         ))}
-      </ScrollView>
+      </PullToRefreshScrollView>
     </SafeAreaView>
   );
 }
