@@ -7,10 +7,11 @@ import {
   useFonts,
 } from '@expo-google-fonts/manrope';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { GlucoseProvider } from './src/services/GlucoseProvider';
+import { startWebUpdateWatcher } from './src/services/webUpdate';
 import { ThemeProvider, useTheme } from './src/theme';
 
 /** Follows the theme in effect (including the user's override), not just the device setting. */
@@ -27,6 +28,9 @@ export default function App() {
     Manrope_700Bold,
     Manrope_800ExtraBold,
   });
+
+  // Web only (a no-op elsewhere): a home-screen web app never reloads on its own, so it asks.
+  useEffect(() => startWebUpdateWatcher(), []);
 
   if (!fontsLoaded) {
     return null;

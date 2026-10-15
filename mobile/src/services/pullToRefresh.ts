@@ -47,3 +47,52 @@ export function pullProgress(state: PullState): number {
   if (state.phase !== 'pulling') return 0;
   return Math.min(1, state.distance / PULL_TRIGGER);
 }
+
+/* ---- Wheel / trackpad (desktop web) -------------------------------------------------------- */
+
+/** A wheel gesture is over once events stop for this long; the next event starts a new one. */
+export const WHEEL_IDLE_MS = 160;
+
+export type WheelPullState = {
+  /** Damped distance, same scale as `PullState.distance`. */
+  distance: number;
+  lastEventAt: number;
+  /** The list was away from the top at some point in this gesture: it is a scroll, never a pull. */
+  awayThisGesture: boolean;
+  /** This gesture already refreshed; ignore the rest of its momentum. */
+  fired: boolean;
+};
+
+export const WHEEL_IDLE: WheelPullState = {
+  distance: 0,
+  lastEventAt: Number.NEGATIVE_INFINITY,
+  awayThisGesture: false,
+  fired: false,
+};
+
+/**
+ * One wheel event (`deltaY` in px, negative = scrolling up). A pull is wheel input that keeps
+ * pushing up while the list is already at the very top, in a gesture that started there. Scrolling
+ * up from the middle of the list and coasting into the top is deliberately not a pull: that gesture
+ * is marked `awayThisGesture` and must pause before a fresh one can count.
+ */
+export function wheelPull(
+  state: WheelPullState,
+  deltaY: number,
+  scrollTop: number,
+  nowMs: number,
+): { next: WheelPullState; trigger: boolean } {
+  const fresh = nowMs - state.lastEventAt > WHEEL_IDLE_MS;
+  let s: WheelPullState = fresh
+    ? { distance: 0, lastEventAt: nowMs, awayThisGesture: false, fired: false }
+    : { ...state, lastEventAt: nowMs };
+
+  if (scrollTop > 0) s = { ...s, distance: 0, awayThisGesture: true };
+  if (s.awayThisGesture || s.fired || deltaY >= 0) {
+    return { next: { ...s, distance: s.fired ? s.distance : 0 }, trigger: false };
+  }
+
+  const distance = Math.min(PULL_MAX, s.distance + Math.abs(deltaY) * DAMPING);
+  const trigger = distance >= PULL_TRIGGER;
+  return { next: { ...s, distance, fired: trigger }, trigger };
+}
