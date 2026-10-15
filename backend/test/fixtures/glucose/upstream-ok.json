@@ -1,0 +1,68 @@
+{
+  "glucose": 230,
+  "unit": "mg/dL",
+  "timestamp": "2026-10-14T20:54:00Z",
+  "history": [
+    { "time": "2026-10-14T20:39:00Z", "value": 214 },
+    { "time": "2026-10-14T20:45:00Z", "value": 221 },
+    { "time": "2026-10-14T20:50:00Z", "value": 226 },
+    { "time": "2026-10-14T20:54:00Z", "value": 230 }
+  ],
+  "predictions": [
+    { "time": "2026-10-14T20:59:00Z", "value": 233 },
+    { "time": "2026-10-14T21:04:00Z", "value": 236 },
+    { "time": "2026-10-14T21:09:00Z", "value": 237 }
+  ],
+  "forecast": [
+    { "minutes": 0, "glucose": 230 },
+    { "minutes": 5, "glucose": 233 }
+  ],
+  "forecast_available": true,
+  "hypoglycemia": {
+    "15m_probability": 0.001,
+    "30m_probability": 0.001,
+    "45m_probability": 0.001,
+    "calibrated": true,
+    "already_low": false,
+    "alert": false,
+    "alert_since": null,
+    "headline": null,
+    "predicted_glucose_15m": 237,
+    "predicted_glucose_30m": 233,
+    "predicted_glucose_45m": 228
+  },
+  "hyperglycemia": {
+    "15m_probability": 0.0008,
+    "30m_probability": 0.0041,
+    "45m_probability": 0.0151,
+    "calibrated": true,
+    "already_high": true,
+    "alert": false,
+    "alert_since": null,
+    "headline": null,
+    "predicted_glucose_15m": 237,
+    "predicted_glucose_30m": 233,
+    "predicted_glucose_45m": 228,
+    "excursion": {
+      "mode": "shadow",
+      "state": "HOLDING",
+      "estimated_range": { "low": 207, "high": 253 },
+      "horizon_ranges": {
+        "15": { "forecast": 237, "low": 207, "high": 253 },
+        "30": { "forecast": 233, "low": 195, "high": 260 },
+        "45": { "forecast": 228, "low": 180, "high": 265 }
+      },
+      "trend_mgdl_per_min": 0.8
+    }
+  },
+  "hazard_low_risk": { "available": true, "probability_30min": 0.0001 },
+  "meta": {
+    "cached": true,
+    "model": "direct_120",
+    "normalization": { "mean": 1 },
+    "inference_ms": 0.69,
+    "generated_at": "2026-10-14T20:59:21Z",
+    "served_at": "2026-10-14T21:00:22Z",
+    "forecast_unavailable_reason": null
+  }
+}
