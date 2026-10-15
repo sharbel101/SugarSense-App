@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll GitHub for new SugarSense commits every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+Persistent=true
+Unit=sugarsense-deploy.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=SugarSense push-to-deploy (poll GitHub, build, swap in if guards pass)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Nice=10
+TimeoutStartSec=1800
+EnvironmentFile=-/etc/sugarsense-deploy.env
+ExecStart=/home/ubuntu/sugarsense-deploy/deploy.sh
