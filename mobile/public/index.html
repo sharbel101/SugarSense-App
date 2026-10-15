@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <!--
+      First-paint chrome colour (the status-bar / notch strip on a phone, the browser toolbar on
+      desktop) before the app's JS has run. Values are `ground` from src/theme/tokens.ts. Once the
+      app is running, src/theme/webChrome.ts replaces these with a single tag that follows the
+      user's Appearance choice (system / light / dark), which these media queries cannot see.
+    -->
+    <meta name="theme-color" content="#F7F9FC" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <title>%WEB_TITLE%</title>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+        /* Paints anything the app's root view doesn't cover (rubber-band overscroll, areas
+           behind the status bar) instead of the browser's default white. Kept in step with the
+           active theme at runtime by src/theme/webChrome.ts. */
+        background-color: #F7F9FC;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background-color: #121212;
+        }
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

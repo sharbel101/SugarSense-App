@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, View } from 'react-native';
+import { View } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
+import { useReducedMotionPreference } from '../services/reducedMotion';
 import { ColorPalette, useColors } from '../theme';
 
 /**
@@ -110,22 +111,6 @@ function ScanAccessory({ color }: { color: string }) {
       <Rect x={x + 3 * CELL} y={y + 3 * CELL} width={CELL} height={CELL} fill={color} />
     </>
   );
-}
-
-function useReducedMotionPreference(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then((value) => {
-      if (mounted) setReduced(value);
-    });
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-  return reduced;
 }
 
 export function PixelMascot() {

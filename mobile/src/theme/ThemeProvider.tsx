@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Appearance, Platform, useColorScheme } from 'react-native';
 import { ColorPalette, darkColors, lightColors } from './tokens';
+import { syncWebChrome } from './webChrome';
 
 export type Scheme = 'light' | 'dark';
 
@@ -77,6 +78,13 @@ export function ThemeProvider({ children, scheme: pinned }: { children: React.Re
     () => ({ scheme, isDark: scheme === 'dark', colors: scheme === 'dark' ? darkColors : lightColors, preference, setPreference }),
     [scheme, preference, setPreference],
   );
+
+  // Web: the status-bar strip and page background live outside the React tree, so push the
+  // active scheme's ground colour to them (see webChrome.ts).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    syncWebChrome(scheme, (scheme === 'dark' ? darkColors : lightColors).ground);
+  }, [scheme]);
 
   // Wait for the saved choice so the first frame is never the wrong theme.
   if (!loaded) return null;

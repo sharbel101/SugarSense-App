@@ -5,6 +5,7 @@ import { MealConfidence } from '../../api/mealsApi';
 import { BackButton, PrimaryButton, RoundButton } from '../../components/Buttons';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
+import { InsulinPenProgressBar } from '../../components/InsulinPenProgressBar';
 import { LoadingWords } from '../../components/LoadingWords';
 import { PixelMascot } from '../../components/PixelMascot';
 import { ScanScreenProps } from '../../navigation/types';
@@ -17,6 +18,7 @@ import {
   runMealAnalysis,
   toConfirmedMeal,
 } from '../../services/mealService';
+import { DEFAULT_FINISH_MS, useSimulatedProgress } from '../../services/simulatedProgress';
 import { ColorPalette, radius, spacing, useColors } from '../../theme';
 
 // Text-weight colours only (never the `*600` icon-only shade at normal size - see
@@ -51,6 +53,29 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo.uri, attempt]);
+
+  // The real result can already be in `state` before the progress bar has visually finished its
+  // run to 100% - `revealed` holds the actual result/error content back for one short beat so that
+  // finish plays out instead of being cut off mid-tween (see InsulinPenProgressBar / DEFAULT_FINISH_MS).
+  // This never delays the real analysis itself, only how soon its already-known outcome is shown.
+  const isUploading = state.kind === 'uploading';
+  const [revealed, setRevealed] = useState(true);
+  // Flip `revealed` synchronously, during render, on the transition itself (not as a setState call
+  // inside the effect below - react-hooks/set-state-in-effect wants that reserved for the effect's
+  // callback, i.e. the setTimeout below, not its immediate body). See the same pattern in
+  // useSimulatedProgress.
+  const [wasUploading, setWasUploading] = useState(isUploading);
+  if (isUploading !== wasUploading) {
+    setWasUploading(isUploading);
+    setRevealed(isUploading);
+  }
+  useEffect(() => {
+    if (isUploading) return;
+    const timer = setTimeout(() => setRevealed(true), DEFAULT_FINISH_MS);
+    return () => clearTimeout(timer);
+  }, [isUploading]);
+  const progress = useSimulatedProgress(isUploading);
+  const showLoading = isUploading || !revealed;
 
   // Sets the visible "uploading" state and clears any in-progress edit synchronously (an event
   // handler, not the effect above), then bumps `attempt` to re-run the effect for a new request.
@@ -103,7 +128,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             {/* The photo stays visible and untouched while analyzing - just a small loading badge
                 in the corner, not a scrim covering it. */}
             <Image source={{ uri: photo.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-            {state.kind === 'uploading' ? (
+            {showLoading ? (
               <View
                 style={{
                   position: 'absolute',
@@ -122,14 +147,17 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             ) : null}
           </View>
 
-          {state.kind === 'uploading' ? (
+          {showLoading ? (
             <View style={{ alignItems: 'center', paddingVertical: 20, gap: 10 }}>
               <PixelMascot />
               <LoadingWords style={{ fontSize: 16 }} />
+              <View style={{ width: '100%', paddingHorizontal: spacing.md, marginTop: 4 }}>
+                <InsulinPenProgressBar percent={progress} />
+              </View>
             </View>
           ) : null}
 
-          {state.kind === 'result' ? (
+          {revealed && state.kind === 'result' ? (
             <ResultContent
               analysis={state.analysis}
               editingIndex={editingIndex}
@@ -140,9 +168,9 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             />
           ) : null}
 
-          {state.kind === 'no_food_detected' ? <MessagePanel title="No food recognized" body={state.reason} /> : null}
+          {revealed && state.kind === 'no_food_detected' ? <MessagePanel title="No food recognized" body={state.reason} /> : null}
 
-          {state.kind === 'needs_manual_entry' ? (
+          {revealed && state.kind === 'needs_manual_entry' ? (
             <>
               <MessagePanel title="Couldn't estimate carbs" body={state.reason} />
               <Card>
@@ -175,18 +203,18 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             </>
           ) : null}
 
-          {state.kind === 'too_large' ? (
+          {revealed && state.kind === 'too_large' ? (
             <MessagePanel
               title="Photo too large"
               body={`This photo is about ${((state.base64Chars * 0.75) / (1024 * 1024)).toFixed(1)} MB, too large to upload. Please retake it.`}
             />
           ) : null}
 
-          {state.kind === 'error' ? <MessagePanel title="Couldn't analyze this photo" body={state.message} /> : null}
+          {revealed && state.kind === 'error' ? <MessagePanel title="Couldn't analyze this photo" body={state.message} /> : null}
         </ScrollView>
 
         <Footer
-          state={state}
+          state={showLoading ? { kind: 'uploading' } : state}
           manualGramsValid={manualGramsValid}
           onRetake={() => navigation.goBack()}
           onRetry={retry}
