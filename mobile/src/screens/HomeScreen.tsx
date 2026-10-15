@@ -95,6 +95,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                   xTicks={chart.xTicks}
                   yTicks={chart.yTicks}
                   height={150}
+                  forecastPoints={chart.forecastPoints}
                   accessibilityLabel={
                     chart.hasForecast
                       ? `Glucose over the last hour with the forecast for the next 2 hours. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre.`

@@ -9,7 +9,7 @@ import {
   reduceGlucose,
   STALE_MINUTES,
 } from '../src/services/glucoseState.ts';
-import { buildGlucoseChart } from '../src/services/glucoseChart.ts';
+import { buildGlucoseChart, nearestForecastPoint } from '../src/services/glucoseChart.ts';
 import { summariseRisk } from '../src/services/glucoseRisk.ts';
 
 const T0 = Date.parse('2026-10-15T10:00:00Z');
@@ -274,4 +274,19 @@ test('risk: null is not reassurance; alert passes headline through; already is s
   const already = summariseRisk(parseGlucoseResponse(okBody({ low: { alert: false, alreadyLow: true } })));
   assert.equal(already.alerting, true);
   assert.equal(already.lines[0], 'Glucose is already low.');
+});
+
+test('chart: forecastPoints carry real time/value and nearestForecastPoint picks the closest by x', () => {
+  const c = buildGlucoseChart(parseGlucoseResponse(okBody()));
+  assert.equal(c.forecastPoints.length, 24);
+  assert.equal(c.forecastPoints[0].minutesAhead, 5);
+  assert.equal(c.forecastPoints[0].value, 130 + 5 / 4);
+  assert.equal(c.forecastPoints[0].timeMs, T0 + 5 * 60000);
+  const target = c.forecastPoints[9];
+  assert.equal(nearestForecastPoint(c.forecastPoints, target.x + 0.2)?.timeMs, target.timeMs);
+  assert.equal(nearestForecastPoint(c.forecastPoints, -50)?.minutesAhead, 5);
+  assert.equal(nearestForecastPoint(c.forecastPoints, 9999)?.minutesAhead, 120);
+  const none = buildGlucoseChart(parseGlucoseResponse(okBody({ forecastAvailable: false, predictions: [] })));
+  assert.deepEqual(none.forecastPoints, []);
+  assert.equal(nearestForecastPoint([], 10), undefined);
 });

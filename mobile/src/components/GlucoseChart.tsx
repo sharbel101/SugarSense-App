@@ -1,6 +1,7 @@
-import React from 'react';
-import { Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
+import { nearestForecastPoint, type ForecastPoint } from '../services/glucoseChart';
 import { useColors } from '../theme';
 
 export type ChartPoint = { x: number; y: number };
@@ -18,6 +19,11 @@ type Props = {
   xTicks?: { frac: number; label: string }[];
   yTicks?: { frac: number; label: string }[];
   height?: number;
+  /**
+   * Server-supplied forecast points. When present, pressing and dragging on the chart shows the
+   * nearest point's predicted value and clock time.
+   */
+  forecastPoints?: ForecastPoint[];
   /** Text alternative for screen readers - describe the trend and the range, not exact values. */
   accessibilityLabel: string;
 };
@@ -43,13 +49,53 @@ export function GlucoseChart({
   xTicks,
   yTicks,
   height,
+  forecastPoints,
   accessibilityLabel,
 }: Props) {
   const colors = useColors();
   const lastActual = actual[actual.length - 1];
 
+  const [scrub, setScrub] = useState<ForecastPoint | null>(null);
+  const widthRef = useRef(0);
+  const pointsRef = useRef<ForecastPoint[]>([]);
+  const vbWidthRef = useRef(viewBoxWidth);
+  useEffect(() => {
+    pointsRef.current = forecastPoints ?? [];
+    vbWidthRef.current = viewBoxWidth;
+  }, [forecastPoints, viewBoxWidth]);
+
+  const updateScrub = (locationX: number) => {
+    if (widthRef.current <= 0 || pointsRef.current.length === 0) return;
+    const x = (locationX / widthRef.current) * vbWidthRef.current;
+    const next = nearestForecastPoint(pointsRef.current, x) ?? null;
+    setScrub((prev) => (prev && next && prev.timeMs === next.timeMs ? prev : next));
+  };
+
+  const canScrub = (forecastPoints?.length ?? 0) > 0;
+  const scrubFrac = scrub ? scrub.x / viewBoxWidth : 0;
+  const scrubLabelPos =
+    scrubFrac > 0.62
+      ? { right: `${(1 - scrubFrac) * 100}%` as `${number}%` }
+      : { left: `${scrubFrac * 100}%` as `${number}%` };
+
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel}>
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={canScrub ? 'Press and drag across the dotted forecast line to read predicted values.' : undefined}
+      onLayout={(e) => {
+        widthRef.current = e.nativeEvent.layout.width;
+      }}
+      onStartShouldSetResponder={() => canScrub}
+      onMoveShouldSetResponder={() => canScrub}
+      onResponderTerminationRequest={() => false}
+      onResponderGrant={(e) => updateScrub(e.nativeEvent.locationX)}
+      onResponderMove={(e) => updateScrub(e.nativeEvent.locationX)}
+      onResponderRelease={() => setScrub(null)}
+      onResponderTerminate={() => setScrub(null)}
+      style={canScrub && Platform.OS === 'web' ? ({ touchAction: 'pan-y', userSelect: 'none' } as object) : undefined}
+    >
       <Svg
         width="100%"
         height={height ?? viewBoxHeight}
@@ -110,6 +156,65 @@ export function GlucoseChart({
           />
         ) : null}
       </Svg>
+
+      {scrub ? (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, height: height ?? viewBoxHeight }}
+        >
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: `${scrubFrac * 100}%`,
+              width: 2,
+              marginLeft: -1,
+              backgroundColor: colors.blue600,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              top: `${(scrub.y / viewBoxHeight) * 100}%`,
+              left: `${scrubFrac * 100}%`,
+              width: 14,
+              height: 14,
+              marginLeft: -7,
+              marginTop: -7,
+              borderRadius: 7,
+              backgroundColor: colors.surface,
+              borderWidth: 3,
+              borderColor: colors.blue600,
+            }}
+          />
+        </View>
+      ) : null}
+
+      {scrub ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            ...scrubLabelPos,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 10,
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.divider,
+          }}
+        >
+          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink }}>
+            {new Date(scrub.timeMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ·{' '}
+            {Math.round(scrub.value)} mg/dL
+          </Text>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
+            Predicted, +{scrub.minutesAhead} min
+          </Text>
+        </View>
+      ) : null}
 
       {yTicks && yTicks.length > 0 ? (
         <View pointerEvents="none" style={{ position: 'absolute', left: 2, top: 0, right: 0, height: height ?? viewBoxHeight }}>

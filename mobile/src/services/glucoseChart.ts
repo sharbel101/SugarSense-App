@@ -9,12 +9,17 @@ import type { GlucoseOk } from '../api/glucoseContract';
 
 export type ChartPoint = { x: number; y: number };
 
+/** One server-supplied forecast point, with its chart position, for press-and-drag inspection. */
+export type ForecastPoint = { x: number; y: number; timeMs: number; value: number; minutesAhead: number };
+
 export type GlucoseChartModel = {
   viewBoxWidth: number;
   viewBoxHeight: number;
   actual: ChartPoint[];
   /** Starts at the latest reading so the dashed line visibly continues the solid one. */
   predicted: ChartPoint[];
+  /** The forecast points as supplied (after the latest reading); empty when there is no forecast. */
+  forecastPoints: ForecastPoint[];
   /** Polygon around the forecast built from `ranges` only; `undefined` when none were supplied. */
   band: ChartPoint[] | undefined;
   /** x of the latest reading. */
@@ -78,6 +83,14 @@ export function buildGlucoseChart(data: GlucoseOk): GlucoseChartModel {
     ? [nowPoint, ...forecast.map((p) => ({ x: xOf(p.t), y: yOf(p.v) }))]
     : [];
 
+  const forecastPoints: ForecastPoint[] = forecast.map((p) => ({
+    x: xOf(p.t),
+    y: yOf(p.v),
+    timeMs: p.t,
+    value: p.v,
+    minutesAhead: Math.round((p.t - nowT) / MIN),
+  }));
+
   let band: ChartPoint[] | undefined;
   if (hasBand) {
     const upper = bandRanges.map((r) => ({ x: xOf(nowT + r.minutes * MIN), y: yOf(r.high) }));
@@ -104,6 +117,7 @@ export function buildGlucoseChart(data: GlucoseOk): GlucoseChartModel {
     viewBoxHeight: H,
     actual,
     predicted,
+    forecastPoints,
     band,
     nowX: nowPoint.x,
     gridLinesY: gridValues.map(yOf),
@@ -114,4 +128,16 @@ export function buildGlucoseChart(data: GlucoseOk): GlucoseChartModel {
     hasForecast,
     hasBand,
   };
+}
+
+/**
+ * The forecast point whose x is closest to `x` (viewBox units); `undefined` when there are no points.
+ * Pure so the drag behaviour can be tested without a UI.
+ */
+export function nearestForecastPoint(points: ForecastPoint[], x: number): ForecastPoint | undefined {
+  let best: ForecastPoint | undefined;
+  for (const p of points) {
+    if (best === undefined || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
+  }
+  return best;
 }

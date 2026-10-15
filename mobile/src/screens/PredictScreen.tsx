@@ -86,6 +86,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
                   xTicks={chart.xTicks}
                   yTicks={chart.yTicks}
                   height={chart.viewBoxHeight}
+                  forecastPoints={chart.forecastPoints}
                   accessibilityLabel={
                     chart.hasForecast
                       ? chart.hasBand
