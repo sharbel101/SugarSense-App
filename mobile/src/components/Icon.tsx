@@ -28,6 +28,7 @@ export type IconName =
   | 'person'
   | 'info'
   | 'close'
+  | 'trash'
   | 'flash'
   | 'flipCamera'
   | 'refresh'
@@ -229,6 +230,16 @@ export function Icon({ name, size = 24, color: colorProp, strokeWidth = 1.8 }: P
           <Circle cx={12} cy={12} r={9} {...common} />
           <Line x1={12} y1={11} x2={12} y2={16} {...common} />
           <Circle cx={12} cy={7.5} r={0.9} fill={color} stroke="none" />
+        </Svg>
+      );
+    case 'trash':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M4 7h16" {...common} />
+          <Path d="M9 7V4h6v3" {...common} />
+          <Path d="M6 7l1 13h10l1-13" {...common} />
+          <Line x1={10} y1={11} x2={10} y2={16} {...common} />
+          <Line x1={14} y1={11} x2={14} y2={16} {...common} />
         </Svg>
       );
     case 'close':

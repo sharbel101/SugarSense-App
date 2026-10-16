@@ -150,6 +150,9 @@ test('getRecent: well-formed 200 only', async () => {
   assert.equal((await getRecent({ baseUrl: '', ...stub(200, { meals: [{ id: 1 }], insulin: [] }) }, 12)).kind, 'unavailable');
   const planned = await getRecent({ baseUrl: '', ...stub(200, { meals: [], insulin: [{ ...INS_VIEW, confirmation: 'planned', unitsTaken: null }] }) }, 12);
   assert.equal(planned.insulin[0].unitsTaken, null, 'a planned dose has no units taken - never 0');
+  assert.equal(ok.insulin[0].status, 'active');
+  const gone = await getRecent({ baseUrl: '', ...stub(200, { meals: [], insulin: [{ ...INS_VIEW, status: 'cancelled' }] }) }, 12);
+  assert.equal(gone.insulin[0].status, 'cancelled');
 });
 
 // -------------------------------------------------------------------------------------- queue

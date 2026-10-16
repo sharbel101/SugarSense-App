@@ -72,6 +72,8 @@ export interface InsulinView {
   unitsTaken: number | null;
   confirmation: 'confirmed' | 'uncertain' | 'planned';
   mealId: string | null;
+  /** 'cancelled' = withdrawn as a mistake: kept in the history, ignored by the forecast. */
+  status: 'active' | 'cancelled';
   revision: number;
 }
 
@@ -262,6 +264,7 @@ function parseInsulinView(v: unknown): InsulinView | null {
     unitsTaken: num(v.unitsTaken),
     confirmation,
     mealId: str(v.mealId),
+    status: v.status === 'cancelled' ? 'cancelled' : 'active',
     revision,
   };
 }
@@ -295,6 +298,8 @@ export type InsulinPatch = {
   confirmation?: 'confirmed' | 'uncertain';
   mealId?: string | null;
   timingUncertain?: boolean;
+  /** Withdraw a mistaken entry; it stops acting in the forecast but stays in the history. */
+  status?: 'cancelled';
   expectedRevision?: number;
 };
 

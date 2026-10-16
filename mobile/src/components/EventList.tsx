@@ -13,7 +13,8 @@ import {
 import type { EventRecord } from '../services/eventQueue';
 import { useEvents } from '../services/EventsProvider';
 import { radius, touch, useColors } from '../theme';
-import { PrimaryButton, SecondaryButton } from './Buttons';
+import { IconButton, PrimaryButton, SecondaryButton } from './Buttons';
+import { Icon } from './Icon';
 import { CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
 
 type Row =
@@ -32,10 +33,12 @@ function buildRows(records: EventRecord[], meals: MealView[], insulin: InsulinVi
   const serverIds = new Set<string>();
   for (const m of meals) {
     serverIds.add(m.id);
+    if (m.status === 'cancelled') continue; // removed from the forecast; kept in history on the server
     rows.push({ key: m.id, kind: 'meal', time: m.eatenAt, view: m, record: records.find((r) => r.serverId === m.id) ?? null });
   }
   for (const i of insulin) {
     serverIds.add(i.id);
+    if (i.status === 'cancelled') continue;
     rows.push({ key: i.id, kind: 'insulin', time: i.administeredAt, view: i, record: records.find((r) => r.serverId === i.id) ?? null });
   }
   for (const r of records) {
@@ -48,8 +51,30 @@ function buildRows(records: EventRecord[], meals: MealView[], insulin: InsulinVi
 
 export function EventList({ onDone }: { onDone: () => void }) {
   const colors = useColors();
-  const { records, recent, refreshRecent, sendNow, saveAnyway, discard } = useEvents();
+  const { records, recent, refreshRecent, sendNow, saveAnyway, discard, editMeal, editInsulin } = useEvents();
   const [editing, setEditing] = useState<Row | null>(null);
+  const [askingKey, setAskingKey] = useState<string | null>(null);
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  // Trash = withdraw the entry: it stops acting in the forecast and stays in the history on the server.
+  const removeEntry = async (row: Row) => {
+    if (!row.view || removingKey) return;
+    setRemoveError(null);
+    setRemovingKey(row.key);
+    const out =
+      row.kind === 'meal'
+        ? await editMeal(row.view.id, { status: 'cancelled', expectedRevision: row.view.revision })
+        : await editInsulin(row.view.id, { status: 'cancelled', expectedRevision: row.view.revision });
+    setRemovingKey(null);
+    setAskingKey(null);
+    if (out.result === 'updated' || out.result === 'unchanged' || out.result === 'exists') refreshRecent();
+    else if (out.result === 'conflict') {
+      refreshRecent();
+      setRemoveError('This entry changed - please check it again.');
+    } else if (out.result === 'invalid') setRemoveError("The server can't remove this entry yet.");
+    else setRemoveError('Could not remove it right now. Nothing was changed - try again.');
+  };
 
   useEffect(() => {
     refreshRecent();
@@ -77,10 +102,20 @@ export function EventList({ onDone }: { onDone: () => void }) {
       {rows.length === 0 && recent.kind !== 'loading' ? (
         <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>Nothing logged in the last 12 hours.</Text>
       ) : null}
+      {removeError ? (
+        <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>
+          {removeError}
+        </Text>
+      ) : null}
       {rows.map((row) => (
         <EventRow
           key={row.key}
           row={row}
+          asking={askingKey === row.key}
+          removing={removingKey === row.key}
+          onAskRemove={() => setAskingKey(row.key)}
+          onCancelRemove={() => setAskingKey(null)}
+          onConfirmRemove={() => void removeEntry(row)}
           onEdit={() => setEditing(row)}
           onSendNow={sendNow}
           onSaveAnyway={() => row.record && saveAnyway(row.record.event.id)}
@@ -95,12 +130,22 @@ export function EventList({ onDone }: { onDone: () => void }) {
 
 function EventRow({
   row,
+  asking,
+  removing,
+  onAskRemove,
+  onCancelRemove,
+  onConfirmRemove,
   onEdit,
   onSendNow,
   onSaveAnyway,
   onDiscard,
 }: {
   row: Row;
+  asking: boolean;
+  removing: boolean;
+  onAskRemove: () => void;
+  onCancelRemove: () => void;
+  onConfirmRemove: () => void;
   onEdit: () => void;
   onSendNow: () => void;
   onSaveAnyway: () => void;
@@ -134,14 +179,16 @@ function EventRow({
   }
   const cancelled = row.kind === 'meal' && row.view?.status === 'cancelled';
   const canEdit = row.view !== null;
+  const canRemove = row.view !== null;
 
   return (
     <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.row, padding: 14, gap: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Pressable
         onPress={canEdit ? onEdit : undefined}
         accessibilityRole={canEdit ? 'button' : 'text'}
         accessibilityLabel={`${title}, ${formatEventTime(row.time)}, ${status}`}
-        style={{ minHeight: touch.min, justifyContent: 'center' }}
+        style={{ flex: 1, minHeight: touch.min, justifyContent: 'center' }}
       >
         <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink, textDecorationLine: cancelled ? 'line-through' : 'none' }}>{title}</Text>
         <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
@@ -149,6 +196,21 @@ function EventRow({
         </Text>
         {canEdit ? <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.blue600 }}>Edit</Text> : null}
       </Pressable>
+      {canRemove ? (
+        <IconButton accessibilityLabel={`Remove ${title}`} onPress={onAskRemove} size={touch.min} bg={colors.red100}>
+          <Icon name="trash" size={20} color={colors.red600} />
+        </IconButton>
+      ) : null}
+      </View>
+      {asking ? (
+        <>
+          <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, lineHeight: 20 }}>
+            {row.kind === 'meal' ? 'Remove this meal?' : 'Remove this insulin record?'} It stops counting in the forecast and stays in your history on the server.
+          </Text>
+          <PrimaryButton label="Remove" onPress={onConfirmRemove} loading={removing} />
+          <SecondaryButton label="Keep it" onPress={onCancelRemove} />
+        </>
+      ) : null}
       {status === 'not sent yet' ? (
         <>
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>Not sent yet - the forecast does not include it.</Text>
