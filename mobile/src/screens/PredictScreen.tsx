@@ -4,12 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
-import { GlucoseChart } from '../components/GlucoseChart';
+import { ForecastChartBlock } from '../components/ForecastExtras';
 import { GlucoseStatus } from '../components/GlucoseStatus';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { TabScreenProps } from '../navigation/types';
 import { buildGlucoseChart } from '../services/glucoseChart';
 import { formatAge, formatClock } from '../services/glucoseState';
+import { useForecast } from '../services/ForecastProvider';
 import { useGlucose } from '../services/GlucoseProvider';
 import { spacing, useColors } from '../theme';
 
@@ -18,6 +19,8 @@ const FORECAST_MARKS = [30, 60, 120] as const;
 export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
   const colors = useColors();
   const { view, refresh, refreshing } = useGlucose();
+  const { view: forecastView } = useForecast();
+  const mealAware = forecastView.kind === 'ok';
   const data = view.kind === 'ok' ? view.data : null;
   const chart = useMemo(() => (data ? buildGlucoseChart(data) : null), [data]);
 
@@ -72,49 +75,18 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
 
             <Card elevated>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Predicted range · next 2 hours
+                Predicted range · next 3 hours
               </Text>
               <View style={{ marginTop: 6 }}>
-                <GlucoseChart
-                  viewBoxWidth={chart.viewBoxWidth}
-                  viewBoxHeight={chart.viewBoxHeight}
-                  actual={chart.actual}
-                  predicted={chart.predicted}
-                  band={chart.band}
-                  nowX={chart.nowX}
-                  gridLinesY={chart.gridLinesY}
-                  xTicks={chart.xTicks}
-                  yTicks={chart.yTicks}
-                  height={chart.viewBoxHeight}
-                  forecastPoints={chart.forecastPoints}
-                  accessibilityLabel={
-                    chart.hasForecast
-                      ? chart.hasBand
-                        ? 'Glucose over the last hour with a forecast line for the next 2 hours and an estimated range for the next 45 minutes.'
-                        : 'Glucose over the last hour with a forecast line for the next 2 hours. No range is available.'
-                      : 'Glucose over the last hour. No forecast is available.'
-                  }
-                />
+                <ForecastChartBlock data={data} height={chart.viewBoxHeight} />
               </View>
-              {chart.hasForecast ? (
-                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
-                  {chart.hasBand
-                    ? 'The shaded band is an estimated range for the next 45 minutes. Beyond that only the forecast line is available, with no range.'
-                    : 'No range was provided, so only the forecast line is shown. It is an estimate, not a range of likely values.'}
-                </Text>
-              ) : (
-                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
-                  Forecast unavailable
-                  {data.forecastUnavailableReason ? `: ${data.forecastUnavailableReason}` : '.'}
-                </Text>
-              )}
             </Card>
 
-            {chart.hasBand && data.rangesAreShadow ? (
+            {!mealAware && chart.hasBand && data.rangesAreShadow ? (
               <Chip label="Estimated ranges: shadow mode, not validated" bg={colors.amber100} color={colors.amberDark} />
             ) : null}
 
-            {data.ranges ? (
+            {!mealAware && data.ranges ? (
               <Card>
                 <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Estimated ranges</Text>
                 {data.ranges.map((r) => (
@@ -130,7 +102,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
               </Card>
             ) : null}
 
-            {marks.length > 0 ? (
+            {!mealAware && marks.length > 0 ? (
               <Card>
                 <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Forecast line</Text>
                 {marks.map((m) => (

@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
-import { GlucoseChart } from '../components/GlucoseChart';
+import { ForecastChartBlock } from '../components/ForecastExtras';
 import { GlucoseStatus } from '../components/GlucoseStatus';
 import { Icon } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
@@ -12,6 +12,8 @@ import { buildGlucoseChart } from '../services/glucoseChart';
 import { summariseRisk } from '../services/glucoseRisk';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
+import { useQuickAdd } from '../components/QuickAdd';
+import { useEvents } from '../services/EventsProvider';
 import { radius, spacing, useColors } from '../theme';
 import { TabScreenProps } from '../navigation/types';
 
@@ -25,6 +27,21 @@ function greeting() {
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const colors = useColors();
   const { view, refresh, refreshing } = useGlucose();
+  const { recent, refreshRecent, pendingCount } = useEvents();
+  const { open: openQuickAdd } = useQuickAdd();
+  useEffect(() => {
+    refreshRecent();
+  }, [refreshRecent]);
+  const summary = (() => {
+    const meals = recent.kind === 'ok' ? recent.meals.filter((m) => m.status !== 'cancelled').length : 0;
+    const doses = recent.kind === 'ok' ? recent.insulin.length : 0;
+    const parts: string[] = [];
+    if (recent.kind === 'ok') parts.push(meals + doses === 0 ? 'Nothing logged in the last 12 hours.' : `${meals} meal${meals === 1 ? '' : 's'}, ${doses} insulin record${doses === 1 ? '' : 's'} in the last 12 hours.`);
+    else if (recent.kind === 'unavailable') parts.push('The list from the server is not available right now.');
+    else parts.push('Use + to add carbs or insulin.');
+    if (pendingCount > 0) parts.push(`${pendingCount} not sent yet.`);
+    return parts.join(' ');
+  })();
   const okData = view.kind === 'ok' ? view.data : null;
   const chart = useMemo(() => (okData ? buildGlucoseChart(okData) : null), [okData]);
   const risk = useMemo(() => (okData ? summariseRisk(okData) : null), [okData]);
@@ -82,41 +99,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
               ) : null}
 
               <View style={{ marginTop: 18 }}>
-                <GlucoseChart
-                  viewBoxWidth={chart.viewBoxWidth}
-                  viewBoxHeight={chart.viewBoxHeight}
-                  actual={chart.actual}
-                  predicted={chart.predicted}
-                  band={chart.band}
-                  nowX={chart.nowX}
-                  gridLinesY={chart.gridLinesY}
-                  xTicks={chart.xTicks}
-                  yTicks={chart.yTicks}
-                  height={150}
-                  forecastPoints={chart.forecastPoints}
-                  accessibilityLabel={
-                    chart.hasForecast
-                      ? `Glucose over the last hour with the forecast for the next 2 hours. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre.`
-                      : `Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre. No forecast available.`
-                  }
-                />
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginTop: 10 }}>
-                  <LegendDot color={colors.blue700} label="Measured" />
-                  {chart.hasForecast ? <LegendDot color={colors.blue500} label="Forecast" dashed /> : null}
-                  {chart.hasBand ? (
-                    <LegendDot
-                      color={colors.blue500}
-                      label={okData.rangesAreShadow ? 'Estimated range (not validated)' : 'Estimated range'}
-                      faint
-                    />
-                  ) : null}
-                </View>
-                {!chart.hasForecast ? (
-                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 8 }}>
-                    Forecast unavailable
-                    {okData.forecastUnavailableReason ? `: ${okData.forecastUnavailableReason}` : '.'}
-                  </Text>
-                ) : null}
+                <ForecastChartBlock data={okData} height={150} />
               </View>
             </>
           ) : view.kind === 'ok' ? null : (
@@ -143,17 +126,18 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
         </Card>
 
-        <Card>
+        <Card onPress={() => openQuickAdd({ mode: 'list' })} accessibilityLabel="Open what you logged today">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconChip bg={colors.amber100}>
               <Icon name="fork" size={19} color={colors.amber600} />
             </IconChip>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Latest meal</Text>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Logged today</Text>
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                No meal history yet.
+                {summary}
               </Text>
             </View>
+            <Icon name="chevronRight" size={18} color={colors.ink4} />
           </View>
         </Card>
 
@@ -171,6 +155,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
         </Card>
       </PullToRefreshScrollView>
+
     </SafeAreaView>
   );
 }
@@ -188,24 +173,6 @@ function IconChip({ bg, children }: { bg: string; children: React.ReactNode }) {
       }}
     >
       {children}
-    </View>
-  );
-}
-
-function LegendDot({ color, label, dashed, faint }: { color: string; label: string; dashed?: boolean; faint?: boolean }) {
-  const colors = useColors();
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-      <View
-        style={{
-          width: faint ? 10 : 14,
-          height: faint ? 10 : 2,
-          borderRadius: faint ? 2 : 1,
-          backgroundColor: color,
-          opacity: faint ? 0.35 : dashed ? 0.7 : 1,
-        }}
-      />
-      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.ink2 }}>{label}</Text>
     </View>
   );
 }

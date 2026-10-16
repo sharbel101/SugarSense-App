@@ -78,22 +78,26 @@ export function manualConfirmedMeal(totalCarbsG: number): ConfirmedMeal {
 export type MealReviewState =
   | { kind: 'uploading' }
   | { kind: 'result'; analysis: EditableMealAnalysis }
-  | { kind: 'no_food_detected'; reason: string }
-  | { kind: 'needs_manual_entry'; reason: string }
+  | { kind: 'no_food_detected'; reason: string; forecastNote?: string }
+  | { kind: 'needs_manual_entry'; reason: string; forecastNote?: string; mealEventId: string | null }
   | { kind: 'too_large'; base64Chars: number }
   | { kind: 'error'; message: string };
 
 /** Uploads `photo` and maps the outcome onto the state `MealReviewScreen` renders. Never throws,
  * except to propagate a caller-initiated `AbortError` so an unmounted screen doesn't call setState. */
-export async function runMealAnalysis(photo: CapturedPhoto, signal?: AbortSignal): Promise<MealReviewState> {
+export async function runMealAnalysis(
+  photo: CapturedPhoto,
+  signal?: AbortSignal,
+  options?: { clientId?: string },
+): Promise<MealReviewState> {
   if (photo.base64.length > MAX_BASE64_CHARS) {
     return { kind: 'too_large', base64Chars: photo.base64.length };
   }
 
   try {
-    const response = await analyzeMeal(photo, { signal });
-    if (response.status === 'no_food_detected') return { kind: 'no_food_detected', reason: response.reason };
-    if (response.status === 'needs_manual_entry') return { kind: 'needs_manual_entry', reason: response.reason };
+    const response = await analyzeMeal(photo, { signal, clientId: options?.clientId });
+    if (response.status === 'no_food_detected') return { kind: 'no_food_detected', reason: response.reason, forecastNote: response.forecastNote };
+    if (response.status === 'needs_manual_entry') return { kind: 'needs_manual_entry', reason: response.reason, forecastNote: response.forecastNote, mealEventId: response.mealEventId ?? null };
     return { kind: 'result', analysis: toEditable(response) };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;

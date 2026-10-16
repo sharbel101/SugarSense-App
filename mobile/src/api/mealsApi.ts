@@ -1,5 +1,6 @@
 import { API_URL } from '../config';
-import { ngrokBypassHeaders } from './requestHeaders';
+import { transportHeaders } from './apiContext';
+import { parseForecastResponse, type ForecastDisplay } from './forecastContract';
 
 /**
  * Meal-photo analysis client. Talks to the backend's `POST /meals/analyze` only - the mobile app
@@ -19,6 +20,14 @@ export type MealConfidence = 'high' | 'medium' | 'low';
 /** GI can never be "high" confidence from a single photo - enforced structurally on the backend too. */
 export type GlycemicIndexConfidence = 'medium' | 'low';
 export type SupportedImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+/** Added by the forecasting layer (additive: an older server sends none of these). */
+export type MealForecastFields = {
+  /** The meal stored on the server, or null/absent when it could not be saved. */
+  mealEventId?: string | null;
+  forecast?: ForecastDisplay | null;
+  forecastNote?: string;
+};
 
 export type MealAnalysisItem = {
   name: string;
@@ -50,21 +59,21 @@ export type MealAnalysisOkResponse = {
   analysisNotes: string | null;
   promptVersion: string;
   modelVersion: string;
-};
+} & MealForecastFields;
 
 export type MealAnalysisNoFoodResponse = {
   status: 'no_food_detected';
   reason: string;
   promptVersion: string;
   modelVersion: string;
-};
+} & MealForecastFields;
 
 export type MealAnalysisNeedsManualEntryResponse = {
   status: 'needs_manual_entry';
   reason: string;
   promptVersion: string;
   modelVersion: string;
-};
+} & MealForecastFields;
 
 export type MealAnalysisResponse =
   | MealAnalysisOkResponse
@@ -106,18 +115,20 @@ export class MealAnalysisFailure extends Error {
  */
 export async function analyzeMeal(
   photo: CapturedPhoto,
-  options?: { userNote?: string; signal?: AbortSignal },
+  options?: { userNote?: string; signal?: AbortSignal; clientId?: string; eatenAt?: string },
 ): Promise<MealAnalysisResponse> {
   const body = JSON.stringify({
     images: [{ base64Data: photo.base64, mimeType: photo.mimeType }],
     ...(options?.userNote ? { userNote: options.userNote } : null),
+    ...(options?.clientId ? { clientId: options.clientId } : null),
+    ...(options?.eatenAt ? { eatenAt: options.eatenAt } : null),
   });
 
   let response: Response;
   try {
     response = await fetch(`${API_URL}/meals/analyze`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...ngrokBypassHeaders(API_URL) },
+      headers: { 'content-type': 'application/json', ...transportHeaders(API_URL) },
       body,
       signal: options?.signal,
     });
@@ -134,5 +145,10 @@ export async function analyzeMeal(
     });
   }
 
-  return (await response.json()) as MealAnalysisResponse;
+  const json = (await response.json()) as MealAnalysisResponse;
+  // The forecast is optional and untrusted: keep it only if it matches the contract.
+  if (json && typeof json === 'object' && 'forecast' in json) {
+    json.forecast = json.forecast ? parseForecastResponse(json.forecast) : null;
+  }
+  return json;
 }

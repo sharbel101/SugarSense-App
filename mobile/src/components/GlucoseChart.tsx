@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
 import { nearestForecastPoint, type ForecastPoint } from '../services/glucoseChart';
-import { useColors } from '../theme';
+import type { EventMarker } from '../services/forecastChart';
+import { touch, useColors } from '../theme';
+import { Icon } from './Icon';
 
 export type ChartPoint = { x: number; y: number };
 
@@ -24,6 +26,14 @@ type Props = {
    * nearest point's predicted value and clock time.
    */
   forecastPoints?: ForecastPoint[];
+  /** Dotted continuation after the glucose-only horizon (only logged events move it). */
+  extension?: ChartPoint[];
+  /** Thin glucose-only comparison line; pass only when it differs from the forecast. */
+  baselineLine?: ChartPoint[];
+  /** Logged meals / insulin on the time axis. */
+  markers?: EventMarker[];
+  /** Text for a tapped marker, e.g. "Meal, 45 g - insulin not recorded". */
+  markerLabel?: (marker: EventMarker) => string;
   /** Text alternative for screen readers - describe the trend and the range, not exact values. */
   accessibilityLabel: string;
 };
@@ -50,12 +60,17 @@ export function GlucoseChart({
   yTicks,
   height,
   forecastPoints,
+  extension,
+  baselineLine,
+  markers,
+  markerLabel,
   accessibilityLabel,
 }: Props) {
   const colors = useColors();
   const lastActual = actual[actual.length - 1];
 
   const [scrub, setScrub] = useState<ForecastPoint | null>(null);
+  const [pickedMarker, setPickedMarker] = useState<string | null>(null);
   const widthRef = useRef(0);
   const pointsRef = useRef<ForecastPoint[]>([]);
   const vbWidthRef = useRef(viewBoxWidth);
@@ -128,6 +143,30 @@ export function GlucoseChart({
             stroke={colors.ink4}
             strokeWidth={1.5}
             strokeDasharray="3 4"
+          />
+        ) : null}
+
+        {baselineLine && baselineLine.length > 1 ? (
+          <Polyline
+            points={toPoints(baselineLine)}
+            fill="none"
+            stroke={colors.ink4}
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ) : null}
+
+        {extension && extension.length > 1 ? (
+          <Polyline
+            points={toPoints(extension)}
+            fill="none"
+            stroke={colors.blue500}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="1 11"
+            opacity={0.7}
           />
         ) : null}
 
@@ -212,6 +251,79 @@ export function GlucoseChart({
           </Text>
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
             Predicted, +{scrub.minutesAhead} min
+          </Text>
+          {scrub.low !== undefined && scrub.high !== undefined ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
+              Range {Math.round(scrub.low)}-{Math.round(scrub.high)}
+              {scrub.baseline !== undefined && scrub.baseline !== null ? ` · glucose-only ${Math.round(scrub.baseline)}` : ''}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {markers && markers.length > 0 ? (
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: touch.min }}>
+          {markers.map((m) => {
+            const filled = m.role === 'used';
+            const label = markerLabel ? markerLabel(m) : m.type === 'meal' ? 'Logged meal' : 'Logged insulin';
+            return (
+              <Pressable
+                key={m.id}
+                onPress={() => setPickedMarker((cur) => (cur === m.id ? null : m.id))}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                style={{
+                  position: 'absolute',
+                  left: `${(m.x / viewBoxWidth) * 100}%`,
+                  bottom: 0,
+                  width: touch.min,
+                  height: touch.min,
+                  marginLeft: -touch.min / 2,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <View
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: filled ? colors.blue600 : colors.surface,
+                    borderWidth: 2,
+                    borderColor: colors.blue600,
+                    borderStyle: filled ? 'solid' : 'dashed',
+                  }}
+                >
+                  <Icon name={m.type === 'meal' ? 'fork' : 'droplet'} size={12} color={filled ? colors.onBlue : colors.blue600} />
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {pickedMarker && markers && markerLabel ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 10,
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.divider,
+          }}
+        >
+          <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>
+            {(() => {
+              const m = markers.find((x) => x.id === pickedMarker);
+              return m ? markerLabel(m) : '';
+            })()}
           </Text>
         </View>
       ) : null}

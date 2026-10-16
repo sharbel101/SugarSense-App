@@ -10,6 +10,9 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { QuickAddProvider } from './src/components/QuickAdd';
+import { EventsProvider } from './src/services/EventsProvider';
+import { ForecastProvider } from './src/services/ForecastProvider';
 import { GlucoseProvider } from './src/services/GlucoseProvider';
 import { startWebUpdateWatcher } from './src/services/webUpdate';
 import { ThemeProvider, useTheme } from './src/theme';
@@ -41,7 +44,13 @@ export default function App() {
       <ThemeProvider>
         <ThemedStatusBar />
         <GlucoseProvider>
-          <RootNavigator />
+          <ForecastProvider>
+            <EventsProvider>
+              <QuickAddProvider>
+                <RootNavigator />
+              </QuickAddProvider>
+            </EventsProvider>
+            </ForecastProvider>
         </GlucoseProvider>
       </ThemeProvider>
     </SafeAreaProvider>

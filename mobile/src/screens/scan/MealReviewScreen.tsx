@@ -1,14 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MealConfidence } from '../../api/mealsApi';
-import { BackButton, PrimaryButton, RoundButton } from '../../components/Buttons';
+import { BackButton, PrimaryButton, RoundButton, SecondaryButton } from '../../components/Buttons';
+import { EventTimePicker, FormField } from '../../components/FormField';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
 import { InsulinPenProgressBar } from '../../components/InsulinPenProgressBar';
 import { LoadingWords } from '../../components/LoadingWords';
 import { PixelMascot } from '../../components/PixelMascot';
 import { ScanScreenProps } from '../../navigation/types';
+import { useQuickAdd } from '../../components/QuickAdd';
+import { useEvents } from '../../services/EventsProvider';
+import {
+  buildMealEvent,
+  FieldErrors,
+  MealField,
+  newEventId,
+  photoMealSource,
+  TimeChoice,
+  validateMeal,
+} from '../../services/events';
 import {
   displayTotalCarbsG,
   editItemCarbsG,
@@ -16,6 +28,7 @@ import {
   manualConfirmedMeal,
   MealReviewState,
   runMealAnalysis,
+  mealLabel,
   toConfirmedMeal,
 } from '../../services/mealService';
 import { DEFAULT_FINISH_MS, useSimulatedProgress } from '../../services/simulatedProgress';
@@ -37,14 +50,28 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
   const { photo } = route.params;
 
   const [state, setState] = useState<MealReviewState>({ kind: 'uploading' });
+  // One id per review screen, reused on every confirm attempt, plus a latch against double taps:
+  // together they make a repeated confirm unable to create a second meal event.
+  const eventIdRef = useRef<string | null>(null);
+  const confirmedRef = useRef(false);
   const [attempt, setAttempt] = useState(0);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [manualGrams, setManualGrams] = useState('');
+  const { addEvent, adoptSavedMeal, editMeal } = useEvents();
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  // Meal name the user can correct; null = still the name derived from the detected foods.
+  const [mealName, setMealName] = useState<string | null>(null);
+  const [eatenAt, setEatenAt] = useState<TimeChoice>({ mode: 'minutesAgo', minutes: 0 });
+  const [eatenHhmm, setEatenHhmm] = useState('');
+  const [confirmErrors, setConfirmErrors] = useState<FieldErrors<MealField>>({});
 
   useEffect(() => {
     const controller = new AbortController();
-    runMealAnalysis(photo, controller.signal)
+    if (!eventIdRef.current) eventIdRef.current = newEventId();
+    // The same id is the analysis request's clientId and the meal event's id: a retry maps to one meal.
+    runMealAnalysis(photo, controller.signal, { clientId: eventIdRef.current })
       .then(setState)
       .catch((error) => {
         if (error instanceof Error && error.name === 'AbortError') return;
@@ -82,6 +109,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
   const retry = () => {
     setState({ kind: 'uploading' });
     setEditingIndex(null);
+    setMealName(null);
     setAttempt((n) => n + 1);
   };
 
@@ -104,6 +132,83 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
 
   const manualGramsValue = Number(manualGrams);
   const manualGramsValid = manualGrams.trim().length > 0 && Number.isFinite(manualGramsValue) && manualGramsValue > 0;
+
+  // Confirm = the only path that records the meal and goes on to the forecast screen. Cancel (back or
+  // the Cancel button) records nothing. The server already stored the analysed meal (`mealEventId`);
+  // confirming PATCHes it (the corrected carbs only when the person changed something) and the server
+  // returns the refreshed forecast. With no `mealEventId`, the meal is queued through the same
+  // POST /events/meals pathway as a manual entry, with the same client id.
+  const confirm = async (analysis: EditableMealAnalysis | null, serverMealId: string | null) => {
+    if (confirmedRef.current) return;
+    const carbsG = analysis ? displayTotalCarbsG(analysis) : manualGramsValue;
+    const defaultName = analysis ? mealLabel(analysis.items.map((i) => i.name)) : 'Meal (entered manually)';
+    const result = validateMeal(
+      {
+        carbs: String(Math.round(carbsG * 10) / 10),
+        label: mealName ?? defaultName,
+        fat: analysis?.totalFatG != null ? String(analysis.totalFatG) : '',
+        protein: analysis?.totalProteinG != null ? String(analysis.totalProteinG) : '',
+        fiber: analysis?.totalFiberG != null ? String(analysis.totalFiberG) : '',
+        absorption: 'unset',
+        timeApproximate: false,
+        time: eatenAt,
+        notes: '',
+      },
+      new Date(),
+    );
+    if (!result.ok) {
+      setConfirmErrors(result.errors);
+      return;
+    }
+    confirmedRef.current = true;
+    setConfirming(true);
+    setConfirmMessage(null);
+    if (!eventIdRef.current) eventIdRef.current = newEventId();
+    const event = buildMealEvent(eventIdRef.current, result.value, {
+      source: analysis ? photoMealSource(analysis.edited) : 'manual',
+      aiCarbsG: analysis ? analysis.totalNetCarbsG : null,
+    });
+    const meal = analysis ? toConfirmedMeal(analysis) : manualConfirmedMeal(carbsG);
+    const timeChanged = eatenAt.mode === 'clock' || eatenAt.minutes > 0;
+    const go = (key: string, pending: boolean) =>
+      navigation.navigate('PostMeal', {
+        meal: { ...meal, label: result.value.label },
+        mealRef: {
+          key,
+          label: `Meal, ${Math.round(result.value.carbsG)} g carbs`,
+          occurredAtUtc: result.value.occurredAtUtc,
+          utcOffsetMin: result.value.utcOffsetMin,
+          carbsG: result.value.carbsG,
+          pending,
+        },
+        forecastNote: analysis?.forecastNote ?? (state.kind === 'needs_manual_entry' ? state.forecastNote ?? null : null),
+      });
+
+    if (serverMealId) {
+      adoptSavedMeal(event, serverMealId);
+      const out = await editMeal(serverMealId, {
+        status: 'confirmed',
+        ...(analysis === null || analysis.edited ? { carbsG: result.value.carbsG } : null),
+        ...(timeChanged ? { eatenAt: result.value.occurredAtUtc } : null),
+      });
+      setConfirming(false);
+      if (out.result === 'updated' || out.result === 'unchanged' || out.result === 'exists') {
+        go(serverMealId, false);
+        return;
+      }
+      // Not confirmed: stay here so nothing is lost, and say why.
+      confirmedRef.current = false;
+      setConfirmMessage(
+        out.result === 'invalid' || out.result === 'conflict'
+          ? out.reason ?? 'The server could not confirm this meal.'
+          : 'Could not reach the server. Nothing was confirmed - try again.',
+      );
+      return;
+    }
+    addEvent(event);
+    setConfirming(false);
+    go(eventIdRef.current, true);
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
@@ -165,10 +270,17 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
               onEditValueChange={setEditValue}
               onBeginEdit={beginEdit}
               onCommitEdit={commitEdit}
+              mealName={mealName ?? mealLabel(state.analysis.items.map((i) => i.name))}
+              onMealNameChange={setMealName}
+              eatenAt={eatenAt}
+              eatenHhmm={eatenHhmm}
+              onEatenAtChange={setEatenAt}
+              onEatenHhmmChange={setEatenHhmm}
+              errors={confirmErrors}
             />
           ) : null}
 
-          {revealed && state.kind === 'no_food_detected' ? <MessagePanel title="No food recognized" body={state.reason} /> : null}
+          {revealed && state.kind === 'no_food_detected' ? <MessagePanel title="No food recognized" body={state.forecastNote ? `${state.reason} ${state.forecastNote}` : state.reason} /> : null}
 
           {revealed && state.kind === 'needs_manual_entry' ? (
             <>
@@ -199,7 +311,13 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
                   />
                   <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2 }}>g</Text>
                 </View>
+                {confirmErrors.carbs ? (
+                  <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.red600, marginTop: 6 }}>
+                    {confirmErrors.carbs}
+                  </Text>
+                ) : null}
               </Card>
+              <EventTimePicker value={eatenAt} hhmm={eatenHhmm} onChange={setEatenAt} onChangeHhmm={setEatenHhmm} error={confirmErrors.time} />
             </>
           ) : null}
 
@@ -218,8 +336,11 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
           manualGramsValid={manualGramsValid}
           onRetake={() => navigation.goBack()}
           onRetry={retry}
-          onConfirmResult={(analysis) => navigation.navigate('PostMeal', { meal: toConfirmedMeal(analysis) })}
-          onConfirmManual={() => navigation.navigate('PostMeal', { meal: manualConfirmedMeal(manualGramsValue) })}
+          onCancel={() => navigation.goBack()}
+          confirming={confirming}
+          message={confirmMessage}
+          onConfirmResult={(analysis) => void confirm(analysis, analysis.mealEventId ?? null)}
+          onConfirmManual={() => void confirm(null, state.kind === 'needs_manual_entry' ? state.mealEventId : null)}
         />
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -233,6 +354,13 @@ function ResultContent({
   onEditValueChange,
   onBeginEdit,
   onCommitEdit,
+  mealName,
+  onMealNameChange,
+  eatenAt,
+  eatenHhmm,
+  onEatenAtChange,
+  onEatenHhmmChange,
+  errors,
 }: {
   analysis: EditableMealAnalysis;
   editingIndex: number | null;
@@ -240,12 +368,27 @@ function ResultContent({
   onEditValueChange: (value: string) => void;
   onBeginEdit: (index: number, currentGrams: number) => void;
   onCommitEdit: () => void;
+  mealName: string;
+  onMealNameChange: (name: string) => void;
+  eatenAt: TimeChoice;
+  eatenHhmm: string;
+  onEatenAtChange: (choice: TimeChoice) => void;
+  onEatenHhmmChange: (text: string) => void;
+  errors: FieldErrors<MealField>;
 }) {
   const colors = useColors();
   const totalG = displayTotalCarbsG(analysis);
 
+  const macros = [
+    analysis.totalFatG != null ? `Fat ${round(analysis.totalFatG)} g` : null,
+    analysis.totalProteinG != null ? `Protein ${round(analysis.totalProteinG)} g` : null,
+    analysis.totalFiberG != null ? `Fibre ${round(analysis.totalFiberG)} g` : null,
+    `~${round(analysis.totalCaloriesKcal)} kcal`,
+  ].filter((m): m is string => m !== null);
+
   return (
     <>
+      <FormField label="Meal name" value={mealName} onChangeText={onMealNameChange} maxLength={80} />
       <View>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>SugarSense detected</Text>
@@ -357,12 +500,16 @@ function ResultContent({
             </View>
           </View>
         ) : null}
+        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink2, marginTop: 10 }}>
+          {macros.join(' · ')} · {analysis.edited ? 'carbs corrected by you' : 'AI estimate - check before confirming'}
+        </Text>
         {analysis.analysisNotes ? (
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3, marginTop: 8, lineHeight: 18 }}>
             {analysis.analysisNotes}
           </Text>
         ) : null}
       </Card>
+      <EventTimePicker value={eatenAt} hhmm={eatenHhmm} onChange={onEatenAtChange} onChangeHhmm={onEatenHhmmChange} error={errors.time ?? errors.carbs} />
     </>
   );
 }
@@ -387,6 +534,9 @@ function Footer({
   manualGramsValid,
   onRetake,
   onRetry,
+  onCancel,
+  confirming,
+  message,
   onConfirmResult,
   onConfirmManual,
 }: {
@@ -394,22 +544,43 @@ function Footer({
   manualGramsValid: boolean;
   onRetake: () => void;
   onRetry: () => void;
+  onCancel: () => void;
+  confirming: boolean;
+  message: string | null;
   onConfirmResult: (analysis: EditableMealAnalysis) => void;
   onConfirmManual: () => void;
 }) {
   const colors = useColors();
+  const { open } = useQuickAdd();
   if (state.kind === 'uploading') return null;
 
   let content: React.ReactNode;
   if (state.kind === 'result') {
-    content = <PrimaryButton label="Confirm" onPress={() => onConfirmResult(state.analysis)} />;
+    content = (
+      <View style={{ gap: 10 }}>
+        {message ? <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{message}</Text> : null}
+        <PrimaryButton label="Confirm meal" onPress={() => onConfirmResult(state.analysis)} loading={confirming} />
+        <SecondaryButton label="Cancel" onPress={onCancel} />
+      </View>
+    );
   } else if (state.kind === 'needs_manual_entry') {
-    content = <PrimaryButton label="Continue" onPress={onConfirmManual} disabled={!manualGramsValid} />;
+    content = (
+      <View style={{ gap: 10 }}>
+        {message ? <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{message}</Text> : null}
+        <PrimaryButton label="Confirm meal" onPress={onConfirmManual} disabled={!manualGramsValid} loading={confirming} />
+        <SecondaryButton label="Cancel" onPress={onCancel} />
+      </View>
+    );
   } else if (state.kind === 'error') {
     content = <PrimaryButton label="Retry" onPress={onRetry} />;
   } else {
-    // no_food_detected, too_large
-    content = <PrimaryButton label="Retake photo" onPress={onRetake} />;
+    // no_food_detected, too_large: retake, or enter the carbs by hand (the same form as the + button)
+    content = (
+      <View style={{ gap: 10 }}>
+        <PrimaryButton label="Retake photo" onPress={onRetake} />
+        <SecondaryButton label="Enter carbs manually" onPress={() => open({ mode: 'meal' })} />
+      </View>
+    );
   }
 
   return (

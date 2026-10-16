@@ -10,7 +10,19 @@ import type { GlucoseOk } from '../api/glucoseContract';
 export type ChartPoint = { x: number; y: number };
 
 /** One server-supplied forecast point, with its chart position, for press-and-drag inspection. */
-export type ForecastPoint = { x: number; y: number; timeMs: number; value: number; minutesAhead: number };
+export type ForecastPoint = {
+  x: number;
+  y: number;
+  timeMs: number;
+  value: number;
+  minutesAhead: number;
+  /** Present when the server supplied an 80% range for this point (GET /forecast). */
+  low?: number;
+  high?: number;
+  /** Glucose-only value; null after that model's horizon. */
+  baseline?: number | null;
+  extension?: boolean;
+};
 
 export type GlucoseChartModel = {
   viewBoxWidth: number;

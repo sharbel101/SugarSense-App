@@ -3,11 +3,12 @@ import { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/n
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CapturedPhoto } from '../api/mealsApi';
 import { ConfirmedMeal } from '../services/mealService';
+import type { MealRef } from '../services/mealRefs';
 
 export type ScanStackParamList = {
   Camera: undefined;
   MealReview: { photo: CapturedPhoto };
-  PostMeal: { meal: ConfirmedMeal };
+  PostMeal: { meal: ConfirmedMeal; mealRef: MealRef; forecastNote?: string | null };
 };
 
 export type TabParamList = {
@@ -21,6 +22,7 @@ export type TabParamList = {
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList>;
   Profile: undefined;
+  InsulinSettings: undefined;
 };
 
 declare global {
