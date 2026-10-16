@@ -1,0 +1,165 @@
+import type { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import type { Server } from 'node:http';
+import request from 'supertest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DbService } from '../db/db.service.js';
+import { closeAll, hasTestDb, iso, makeRig, nowSec, setTestTherapy, type Rig } from '../../test/forecasting-rig.js';
+import { EventsApiService } from './events-api.service.js';
+import { EventsController, ForecastController, TherapyController } from './forecasting.controllers.js';
+import { ForecastService } from './forecast.service.js';
+import { PersonalizationService } from './personalization.service.js';
+import { TherapyService } from './therapy.service.js';
+import { UsersService } from './users.service.js';
+
+async function appFor(rig: Rig): Promise<INestApplication<Server>> {
+  // Nest would call onModuleDestroy on the shared pool when the app closes; the tests close it once at the end.
+  const db = Object.create(rig.db, { onModuleDestroy: { value: async () => undefined } }) as DbService;
+  const moduleRef = await Test.createTestingModule({
+    controllers: [ForecastController, EventsController, TherapyController],
+    providers: [
+      { provide: ForecastService, useValue: rig.forecast },
+      { provide: EventsApiService, useValue: rig.api },
+      { provide: TherapyService, useValue: rig.therapy },
+      { provide: UsersService, useValue: rig.users },
+      { provide: PersonalizationService, useValue: rig.personalization },
+      { provide: DbService, useValue: db },
+    ],
+  }).compile();
+  const app = moduleRef.createNestApplication<INestApplication<Server>>();
+  await app.init();
+  return app;
+}
+
+describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
+  let rig: Rig;
+  let app: INestApplication<Server>;
+
+  beforeEach(async () => {
+    rig = makeRig({ glucose: 130, baseline: () => 130 });
+    app = await appFor(rig);
+  });
+  afterEach(async () => {
+    await app.close();
+    delete process.env.APP_API_TOKEN;
+  });
+  afterAll(closeAll);
+
+  it('therapy settings: validates, saves a new version, reads it back, never accepts bad ratios', async () => {
+    const http = request(app.getHttpServer());
+    await http.get('/therapy/settings').expect(200).expect((r) => {
+      expect(r.body.status).toBe('not_set');
+      expect(r.body.whenMissing).toMatch(/No default ratio is assumed/);
+    });
+    await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 0 }] }).expect(400);
+    await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 11 }], autoAdjust: true }).expect(400);
+    const saved = await http
+      .put('/therapy/settings')
+      .send({ source: 'clinician_prescribed', icrSegments: [{ startMinute: 0, gramsPerUnit: 11 }], isfSegments: [{ startMinute: 0, mgdlPerUnit: 48 }] })
+      .expect(200);
+    expect(saved.body).toMatchObject({ status: 'set', version: 1, source: 'clinician_prescribed' });
+    expect(saved.body.icrSegments).toEqual([{ startMinute: 0, startTime: '00:00', gramsPerUnit: 11 }]);
+    await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 12 }] }).expect(200);
+    const hist = await http.get('/therapy/settings/history').expect(200);
+    expect(hist.body.versions.map((v: { version: number }) => v.version)).toEqual([2, 1]);
+  });
+
+  it('meal and insulin entry: 201 then 200 on retry, 409 for a probable double entry, forecast refreshed', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const meal = { clientId: 'http-meal-0001', eatenAt: iso(nowSec() - 300), carbsG: 40 };
+    const a = await http.post('/events/meals').send(meal).expect(201);
+    expect(a.body).toMatchObject({ result: 'created', meal: { carbs: { grams: 40, kind: 'user_entered' } } });
+    expect(a.body.forecast.status).toBe('ok');
+    await http.post('/events/meals').send(meal).expect(200).expect((r) => expect(r.body.result).toBe('exists'));
+    await http.post('/events/meals').send({ ...meal, clientId: 'http-meal-0002' }).expect(409).expect((r) => expect(r.body.result).toBe('duplicate'));
+    await http.post('/events/meals').send({ ...meal, clientId: 'http-meal-0003', eatenAt: iso(nowSec() + 3600) }).expect(422);
+    await http.post('/events/meals').send({ clientId: 'x', eatenAt: 'soon' }).expect(400);
+
+    const dose = await http
+      .post('/events/insulin')
+      .send({ clientId: 'http-dose-0001', administeredAt: meal.eatenAt, kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual', mealId: a.body.meal.id })
+      .expect(201);
+    expect(dose.body.forecast.mealAware.availability).toMatchObject({ mealsUsed: 1, insulinDosesUsed: 1 });
+
+    const edited = await http.patch(`/events/meals/${a.body.meal.id}`).send({ carbsG: 55 }).expect(200);
+    expect(edited.body.meal).toMatchObject({ revision: 2, carbs: { grams: 55 } });
+    await http.patch(`/events/meals/${a.body.meal.id}`).send({ carbsG: 55 }).expect(200).expect((r) => expect(r.body.result).toBe('unchanged'));
+    await http.patch('/events/meals/not-a-uuid').send({ carbsG: 5 }).expect(400);
+    await http.patch(`/events/meals/${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}`).send({ carbsG: 5 }).expect(404);
+
+    const cov = await http.get(`/events/meals/${a.body.meal.id}/coverage`).expect(200);
+    expect(cov.body).toMatchObject({ insulinRecord: 'linked', insulinUnits: 4, expectedCoverageG: 40, carbsMinusCoverageG: 15 }); // 55 g (edited) vs 4 U x ICR 10
+    const recent = await http.get('/events/recent?hours=3').expect(200);
+    expect(recent.body.meals).toHaveLength(1);
+    expect(recent.body.insulin).toHaveLength(1);
+  });
+
+  it('label on a meal, cancelling an insulin entry, and on-board values on every point', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const m = await http.post('/events/meals').send({ clientId: 'http-label-0001', eatenAt: iso(nowSec() - 300), carbsG: 30, label: 'Pasta' }).expect(201);
+    expect(m.body.meal.label).toBe('Pasta');
+    await http.post('/events/meals').send({ clientId: 'http-label-0002', eatenAt: iso(nowSec() - 4000), carbsG: 10, label: '' }).expect(400);
+    const d = await http.post('/events/insulin').send({ clientId: 'http-cancel-0001', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual', mealId: m.body.meal.id }).expect(201);
+    expect(d.body.forecast.points[0]).toEqual(expect.objectContaining({ insulinOnBoardUnits: expect.any(Number), carbsOnBoardGrams: expect.any(Number) }));
+    await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ status: 'active' }).expect(400);
+    const c = await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ status: 'cancelled' }).expect(200);
+    expect(c.body.insulin.status).toBe('cancelled');
+    expect(c.body.forecast.mealAware.availability.insulin).toBe('none_recorded');
+    await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ unitsAdministered: 2 }).expect(422);
+  });
+
+  it('GET /forecast and the what-if route', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const m = await http.post('/events/meals').send({ clientId: 'http-meal-1001', eatenAt: iso(nowSec() - 300), carbsG: 60 }).expect(201);
+    await http.post('/events/insulin').send({ clientId: 'http-dose-1001', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual' }).expect(201);
+
+    const normal = await http.get('/forecast?horizonMin=120').expect(200);
+    expect(normal.body.status).toBe('ok');
+    expect(normal.body.points).toHaveLength(24);
+    const cf = await http.post('/forecast/counterfactual').send({ excludeMealIds: [m.body.meal.id] }).expect(200);
+    expect(cf.body.mealAware).toMatchObject({ counterfactual: true, excludedMealIds: [m.body.meal.id] });
+    expect(cf.body.saved).toBe(false);
+    await http.post('/forecast/counterfactual').send({ excludeMealIds: [] }).expect(400);
+    await http.post('/forecast/counterfactual').send({ excludeMealIds: ['nope'] }).expect(400);
+    await http.get('/forecast?horizonMin=9999').expect(400);
+
+    const ev = await http.get('/forecast/evaluation').expect(200);
+    expect(ev.body.comparison).toEqual([]);
+    expect(ev.body.note).toMatch(/Nothing can be said about accuracy/);
+  });
+
+  it('the shared app token, when configured, protects every route', async () => {
+    process.env.APP_API_TOKEN = 'test-token-123';
+    const http = request(app.getHttpServer());
+    await http.get('/forecast').expect(401);
+    await http.get('/therapy/settings').expect(401);
+    await http.post('/events/meals').send({}).expect(401);
+    await http.get('/forecast').set('x-app-token', 'test-token-123').expect(200);
+  });
+
+  it('database failure answers 503 with a fixed message and leaks nothing', async () => {
+    const bad = makeRig({ url: 'postgresql://nobody:secretpw@127.0.0.1:1/none' });
+    const badApp = await appFor(bad);
+    try {
+      const http = request(badApp.getHttpServer());
+      for (const res of [
+        await http.get('/therapy/settings').expect(503),
+        await http.post('/events/meals').send({ clientId: 'bad-db-00001', eatenAt: iso(nowSec() - 60), carbsG: 20 }).expect(503),
+        await http.get('/events/recent').expect(503),
+      ]) {
+        expect(res.body).toEqual({ status: 'unavailable', reason: 'Saving and reading your history is not available right now.' });
+        expect(JSON.stringify(res.body)).not.toMatch(/127\.0\.0\.1|ECONN|secretpw|nobody|postgres/i);
+      }
+      // the forecast itself still answers (glucose-only) rather than failing
+      const f = await http.get('/forecast').expect(200);
+      expect(f.body.status).toBe('ok');
+      expect(f.body.saved).toBe(false);
+      expect(JSON.stringify(f.body)).not.toMatch(/127\.0\.0\.1|ECONN|secretpw|nobody/i);
+    } finally {
+      await badApp.close();
+    }
+  });
+});

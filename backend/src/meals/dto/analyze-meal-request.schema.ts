@@ -32,6 +32,15 @@ export const analyzeMealImageSchema = z.object({
 export const analyzeMealRequestSchema = z.object({
   images: z.array(analyzeMealImageSchema).min(1).max(1),
   userNote: z.string().trim().max(500).optional(),
+  /** Optional: when eating started (ISO, UTC or with offset). Default: the time of the request. */
+  eatenAt: z.iso.datetime({ offset: true }).optional(),
+  /** Optional: id the app generated for this photo, so a retry maps to the same meal event. */
+  clientId: z
+    .string()
+    .min(8)
+    .max(80)
+    .regex(/^[A-Za-z0-9._-]+$/)
+    .optional(),
 });
 
 export type AnalyzeMealRequest = z.infer<typeof analyzeMealRequestSchema>;

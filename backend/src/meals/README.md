@@ -111,3 +111,12 @@ failure can never be mistaken for a real (possibly low-carb) estimate.
   (`RATE_LIMIT_MEALS_PER_IP`, `RATE_LIMIT_MEALS_GLOBAL`). Exceeding it returns HTTP 429
   `{ "status": "rate_limited", "retryAfterSeconds": n }` plus `Retry-After`. The UI should show
   "try again in a minute" and offer manual entry.
+
+## Forecast fields (added 2026-10-16, additive)
+
+When the forecasting layer is available the response of `POST /meals/analyze` carries three extra fields on every variant:
+`mealEventId` (the stored meal event, or null), `forecast` (the refreshed glucose forecast, or null) and `forecastNote`.
+On `no_food_detected` / `needs_manual_entry` the forecast is the glucose-only one and the note says the meal is not included.
+Optional request fields: `clientId` (a retry maps to the same meal event) and `eatenAt` (ISO time eating started; default: now).
+The Gemini schema and prompt are unchanged (fat, protein, fibre, GI and the carbohydrate range were already returned).
+Contract: `../forecasting/README.md`.

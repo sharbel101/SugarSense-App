@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { MealForecastFlow, sha256Hex } from '../forecasting/meal-forecast-flow.js';
 import type { AnalyzeMealRequest } from './dto/analyze-meal-request.schema.js';
 import { runGate1Structural } from './gates/gate1-structural.js';
 import { runGate2SemanticSanity } from './gates/gate2-semantic.js';
@@ -29,9 +30,29 @@ export class MealsService {
   constructor(
     @Inject(MEAL_VISION_PROVIDER) private readonly provider: MealVisionProvider,
     @Inject(MEAL_ANALYSIS_SLEEP_FN) private readonly sleep: SleepFn,
+    @Optional() @Inject(MealForecastFlow) private readonly forecastFlow?: MealForecastFlow,
   ) {}
 
+  /**
+   * Photo -> validated analysis (unchanged) -> meal event + updated forecast in the same response.
+   * The forecasting step is additive and never alters or withholds the analysis result.
+   */
   async analyzeMeal(request: AnalyzeMealRequest): Promise<MealAnalysisResponse> {
+    const analysis = await this.analyzeCore(request);
+    if (!this.forecastFlow) return analysis;
+    if (analysis.status === 'ok') {
+      const extra = await this.forecastFlow.afterAnalysis(analysis, {
+        imageSha256: sha256Hex(request.images[0]?.base64Data ?? ''),
+        clientId: request.clientId,
+        eatenAt: request.eatenAt,
+        userNote: request.userNote,
+      });
+      return { ...analysis, ...extra };
+    }
+    return { ...analysis, ...(await this.forecastFlow.afterFailedAnalysis()) };
+  }
+
+  private async analyzeCore(request: AnalyzeMealRequest): Promise<MealAnalysisResponse> {
     let lastFailureSummary = 'no attempts were made';
     let lastKnownModelVersion = UNKNOWN_MODEL_VERSION;
 

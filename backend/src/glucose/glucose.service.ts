@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ForecastUpstreamClient, type ForecastFailureCause } from './forecast-upstream.client.js';
 import type {
@@ -7,6 +7,7 @@ import type {
   GlucoseUnavailableResponse,
 } from './glucose-response.js';
 import { mapUpstreamGlucose } from './map-upstream-glucose.js';
+import { GlucoseIngestService } from '../forecasting/glucose-ingest.service.js';
 import { upstreamGlucoseSchema } from './schema/upstream-glucose.schema.js';
 
 export type NowFn = () => number;
@@ -50,6 +51,7 @@ export class GlucoseService {
     private readonly client: ForecastUpstreamClient,
     private readonly config: ConfigService,
     @Inject(GLUCOSE_NOW_FN) private readonly now: NowFn,
+    @Optional() @Inject(GlucoseIngestService) private readonly ingest?: GlucoseIngestService,
   ) {}
 
   /** Never throws: every path is one of the three response variants. */
@@ -83,6 +85,9 @@ export class GlucoseService {
     // Rounded UP so a reading is never shown fresher than it is.
     const ageMinutes = Math.max(0, Math.ceil((nowMs - measuredMs) / 60_000));
     if (ageMinutes > this.staleMinutes()) return stale(body.timestamp);
+
+    // Keep what was measured: readings are stored (idempotently) in the background and never delay the reply.
+    this.ingest?.recordInBackground([...body.history, { time: body.timestamp, value: body.glucose }]);
 
     return mapUpstreamGlucose(body, ageMinutes);
   }

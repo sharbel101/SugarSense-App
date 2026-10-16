@@ -1,4 +1,18 @@
+import type { ForecastDisplay } from '../forecasting/forecast-response.js';
 import type { GlycemicIndexConfidence, MealAnalysisItem } from './schema/meal-analysis.schema.js';
+
+/**
+ * Added when the forecasting layer is available (additive: older clients ignore these). The photo
+ * analysis is stored as a meal event and the updated forecast comes back in the same response. When the
+ * analysis could not be used, the glucose-only forecast is still returned with a note saying why the meal is
+ * absent. None of these fields carries the raw model response or any internal parameter.
+ */
+export interface PhotoForecastFields {
+  /** Id of the stored meal event (use it to correct the estimate or to build a what-if view); null if not saved. */
+  mealEventId?: string | null;
+  forecast?: ForecastDisplay | null;
+  forecastNote?: string;
+}
 
 /**
  * The HTTP response contract for POST /meals/analyze (task point 9: "the full schema above plus
@@ -11,7 +25,7 @@ import type { GlycemicIndexConfidence, MealAnalysisItem } from './schema/meal-an
  * client has to trust.
  */
 
-export interface MealAnalysisOkResponse {
+export interface MealAnalysisOkResponse extends PhotoForecastFields {
   status: 'ok';
   items: MealAnalysisItem[];
   totalNetCarbsG: number;
@@ -28,14 +42,14 @@ export interface MealAnalysisOkResponse {
   modelVersion: string;
 }
 
-export interface MealAnalysisNoFoodResponse {
+export interface MealAnalysisNoFoodResponse extends PhotoForecastFields {
   status: 'no_food_detected';
   reason: string;
   promptVersion: string;
   modelVersion: string;
 }
 
-export interface MealAnalysisNeedsManualEntryResponse {
+export interface MealAnalysisNeedsManualEntryResponse extends PhotoForecastFields {
   status: 'needs_manual_entry';
   reason: string;
   promptVersion: string;
