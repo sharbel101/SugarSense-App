@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MAX_ANALYSIS_ATTEMPTS, MealsService, type SleepFn } from './meals.service.js';
 import { FakeMealVisionProvider, fakeNetworkError } from './providers/fake-meal-vision.provider.js';
+import { MealVisionApiError } from './providers/meal-vision.provider.js';
 import type { AnalyzeMealRequest } from './dto/analyze-meal-request.schema.js';
 
 const request: AnalyzeMealRequest = {
@@ -59,6 +60,18 @@ function instantSleep(): { sleep: SleepFn; delays: number[] } {
 }
 
 describe('MealsService.analyzeMeal', () => {
+  it('waits much longer before retrying after an overload (503) than after another failure', async () => {
+    const delays: number[] = [];
+    const provider = new FakeMealVisionProvider([
+      { kind: 'error', error: new MealVisionApiError('Gemini API error (status 503).', 503) },
+      { kind: 'raw', rawText: detectedRawText },
+    ]);
+    const service = new MealsService(provider, async (ms) => void delays.push(ms));
+    const res = await service.analyzeMeal({ images: [{ base64Data: 'ZmFrZQ==', mimeType: 'image/jpeg' }] });
+    expect(res.status).toBe('ok');
+    expect(delays).toEqual([4000]);
+  });
+
   it('returns status "ok" on a clean first attempt, with prompt/model version attached', async () => {
     const provider = new FakeMealVisionProvider([{ kind: 'raw', rawText: detectedRawText, modelVersion: 'm1' }]);
     const { sleep } = instantSleep();

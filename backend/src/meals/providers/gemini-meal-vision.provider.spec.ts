@@ -116,6 +116,41 @@ describe('GeminiMealVisionProvider (security boundary: no API key material ever 
     warnSpy.mockRestore();
   });
 
+  it('tries the configured fallback model once when the primary is overloaded, and reports the model that answered', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const provider = new GeminiMealVisionProvider(
+      fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_MODEL: 'primary-model', GEMINI_FALLBACK_MODEL: 'fallback-model' }),
+    );
+    hoisted.generateContent
+      .mockRejectedValueOnce(new hoisted.MockApiError({ message: 'high demand', status: 503 }))
+      .mockResolvedValueOnce({ text: '{"ok":true}' });
+    const result = await provider.analyzeMealPhoto({ images: [{ base64Data: 'ZmFrZQ==', mimeType: 'image/jpeg' }] });
+    expect(result).toEqual({ rawText: '{"ok":true}', modelVersion: 'fallback-model' });
+    expect(hoisted.generateContent.mock.calls.map((c) => (c[0] as { model: string }).model)).toEqual(['primary-model', 'fallback-model']);
+    warnSpy.mockRestore();
+  });
+
+  it('does not use the fallback for a caller error (401), when none is configured, or when it equals the primary', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const call = (values: Record<string, string | undefined>, status: number) => {
+      hoisted.generateContent.mockReset();
+      hoisted.generateContent.mockRejectedValue(new hoisted.MockApiError({ message: 'x', status }));
+      return new GeminiMealVisionProvider(fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, ...values })).analyzeMealPhoto({
+        images: [{ base64Data: 'ZmFrZQ==', mimeType: 'image/jpeg' }],
+      });
+    };
+    await expect(call({ GEMINI_FALLBACK_MODEL: 'fb' }, 401)).rejects.toThrow('status 401');
+    expect(hoisted.generateContent).toHaveBeenCalledTimes(1);
+    await expect(call({}, 503)).rejects.toThrow('status 503');
+    expect(hoisted.generateContent).toHaveBeenCalledTimes(1);
+    await expect(call({ GEMINI_MODEL: 'same', GEMINI_FALLBACK_MODEL: 'same' }, 503)).rejects.toThrow('status 503');
+    expect(hoisted.generateContent).toHaveBeenCalledTimes(1);
+    // both models overloaded: the second failure is what the caller sees, and it never contains the key
+    await expect(call({ GEMINI_MODEL: 'a', GEMINI_FALLBACK_MODEL: 'b' }, 503)).rejects.toThrow('Gemini API error (status 503).');
+    expect(hoisted.generateContent).toHaveBeenCalledTimes(2);
+    warnSpy.mockRestore();
+  });
+
   it('returns the raw text and model version on success, reporting the server-echoed modelVersion', async () => {
     const provider = new GeminiMealVisionProvider(fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY }));
     hoisted.generateContent.mockResolvedValueOnce({ text: '{"ok":true}', modelVersion: 'gemini-3.8-flash-001' });

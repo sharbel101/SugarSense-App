@@ -10,11 +10,14 @@ import {
   MealVisionApiError,
   type MealVisionProvider,
 } from './providers/meal-vision.provider.js';
+import { isTransientStatus } from './providers/gemini-meal-vision.provider.js';
 import type { MealAnalysisResult } from './schema/meal-analysis.schema.js';
 
 /** "Retry with exponential backoff, max 2 attempts" (CLAUDE.md section 9 / HANDOFF section 5). */
 export const MAX_ANALYSIS_ATTEMPTS = 2;
 const BASE_BACKOFF_MS = 500;
+/** After an overload (429 / 5xx) half a second is far too short; wait long enough for a short spike to pass. */
+const OVERLOAD_BACKOFF_MS = 4000;
 
 export type SleepFn = (ms: number) => Promise<void>;
 export const MEAL_ANALYSIS_SLEEP_FN = 'MEAL_ANALYSIS_SLEEP_FN';
@@ -55,12 +58,13 @@ export class MealsService {
   private async analyzeCore(request: AnalyzeMealRequest): Promise<MealAnalysisResponse> {
     let lastFailureSummary = 'no attempts were made';
     let lastKnownModelVersion = UNKNOWN_MODEL_VERSION;
+    let lastWasOverload = false;
 
     for (let attempt = 1; attempt <= MAX_ANALYSIS_ATTEMPTS; attempt += 1) {
       if (attempt > 1) {
         // Exponential backoff between attempts (2^(attempt-2) * base; with 2 total attempts this is
         // just one wait of BASE_BACKOFF_MS, but the formula generalises if MAX_ANALYSIS_ATTEMPTS grows).
-        await this.sleep(BASE_BACKOFF_MS * 2 ** (attempt - 2));
+        await this.sleep((lastWasOverload ? OVERLOAD_BACKOFF_MS : BASE_BACKOFF_MS) * 2 ** (attempt - 2));
       }
 
       let rawText: string;
@@ -76,6 +80,7 @@ export class MealsService {
       } catch (err) {
         // Cause 1 of 3: API/network failure. Logged distinctly from the two gate failures below
         // (task point 5: "don't collapse them into one generic error").
+        lastWasOverload = err instanceof MealVisionApiError && isTransientStatus(err.cause);
         const message = err instanceof MealVisionApiError ? err.message : 'unexpected provider error';
         this.logger.warn(
           `meals.analyze attempt ${attempt}/${MAX_ANALYSIS_ATTEMPTS}: API/network failure - ${message}`,

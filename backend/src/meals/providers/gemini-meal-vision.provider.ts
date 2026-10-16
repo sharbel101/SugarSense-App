@@ -42,11 +42,15 @@ export class GeminiMealVisionProvider implements MealVisionProvider {
   private readonly logger = new Logger(GeminiMealVisionProvider.name);
   private readonly client: GoogleGenAI | null;
   private readonly model: string;
+  /** Optional second model tried once, inside the same attempt, when the first one is overloaded. */
+  private readonly fallbackModel: string | undefined;
   private readonly apiKey: string | undefined;
 
   constructor(config: ConfigService) {
     this.apiKey = config.get<string>('GEMINI_API_KEY');
     this.model = config.get<string>('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
+    const fallback = config.get<string>('GEMINI_FALLBACK_MODEL')?.trim();
+    this.fallbackModel = fallback && fallback !== this.model ? fallback : undefined;
     // Deliberately lazy/nullable rather than throwing here: the rest of the server (e.g. /health)
     // must keep working even if this one key is unset (HANDOFF-BACKEND-AI.md: "nothing is required
     // for the server to start"). analyzeMealPhoto throws a clear, specific error if it's actually used.
@@ -77,8 +81,22 @@ export class GeminiMealVisionProvider implements MealVisionProvider {
     const parts = request.userNote ? [...imageParts, createPartFromText(request.userNote)] : imageParts;
 
     try {
-      const response = await this.client.models.generateContent({
-        model: this.model,
+      return await this.generate(this.client, this.model, parts);
+    } catch (err) {
+      // 429 / 5xx are usually a short overload of one model: try the configured fallback model once,
+      // inside this attempt. The model that actually answered is what gets stored as modelVersion.
+      if (this.fallbackModel && err instanceof MealVisionApiError && isTransientStatus(err.cause)) {
+        this.logger.warn(`Gemini ${String(err.cause)} on the primary model; trying the fallback model`);
+        return this.generate(this.client, this.fallbackModel, parts);
+      }
+      throw err;
+    }
+  }
+
+  private async generate(client: GoogleGenAI, model: string, parts: ReturnType<typeof createPartFromBase64>[]): Promise<MealVisionRawResult> {
+    try {
+      const response = await client.models.generateContent({
+        model,
         contents: createUserContent(parts),
         config: {
           systemInstruction: buildMealAnalysisSystemPrompt(),
@@ -99,7 +117,7 @@ export class GeminiMealVisionProvider implements MealVisionProvider {
       }
       // Prefer the model version the server itself reports it ran (most reproducible); fall back to
       // the configured string if the field is ever absent.
-      return { rawText, modelVersion: response.modelVersion ?? this.model };
+      return { rawText, modelVersion: response.modelVersion ?? model };
     } catch (err) {
       if (err instanceof MealVisionApiError) throw err;
       // Extract only message/status - never forward the raw SDK error object (see class doc comment).
@@ -112,4 +130,9 @@ export class GeminiMealVisionProvider implements MealVisionProvider {
       throw new MealVisionApiError('Gemini call failed.');
     }
   }
+}
+
+/** Overload / rate-limit / server-side statuses that are worth one more try, not a caller mistake. */
+export function isTransientStatus(status: unknown): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
