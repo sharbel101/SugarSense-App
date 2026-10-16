@@ -1,0 +1,8 @@
+[Unit]
+Description=SugarSense PostgreSQL backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sugarsense-db-backup

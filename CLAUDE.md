@@ -537,8 +537,11 @@ Conventions for contributors (human or AI):
 Decided: React Native + Expo with TypeScript (**day-to-day UI work runs in the browser via Expo Web on
 localhost; native features are tested later on physical Android/iPhone using Expo development builds,
 not Expo Go**); NestJS backend on localhost; Python `ml/`; PostgreSQL/Supabase for data.
-Still open: ORM / query layer for Postgres (only the `pg` driver and `@supabase/supabase-js` are
-installed; no data models exist), how shared TS packages reach both `mobile/` and `backend/`, BLE
+Database (2026-10-16): self-hosted PostgreSQL 16 on the Oracle VM (localhost only), schema as plain
+versioned SQL in `backend/db/migrations/` applied by `backend/db/migrate.mjs`; see `backend/db/README.md`.
+The Nest backend does not use it yet.
+Still open: ORM / query layer for Postgres in the Nest code (only the `pg` driver and
+`@supabase/supabase-js` are installed), how shared TS packages reach both `mobile/` and `backend/`, BLE
 library (`react-native-ble-plx` is the likely candidate but is deliberately NOT installed - the band is
 not chosen), on-device inference runtime (ONNX Runtime Mobile vs TFLite vs ExecuTorch), which
 vision-language model, band model to target first, and the final `com.sugarsense.app` application id
