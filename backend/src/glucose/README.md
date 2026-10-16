@@ -155,7 +155,7 @@ abort after 8 s -> `timeout`; redirect -> `network`; non-JSON 200 -> `invalid_js
 call.
 
 E2E (`test/glucose.e2e-spec.ts`): override `ForecastUpstreamClient`; `GET /glucose` returns 200 and the
-variant for ok/stale/unavailable; `Cache-Control: no-store` present; no auth header needed (until auth lands).
+variant for ok/stale/unavailable; `Cache-Control: no-store` present; send `X-App-Token` only if the server sets `APP_API_TOKEN` (401 `{status:"unauthorized"}` otherwise); may return HTTP 429 `{status:"rate_limited",retryAfterSeconds}` with a `Retry-After` header - treat as "try again later", never as a glucose value.
 
 Fixture: save a trimmed real upstream body (use `FORECAST-API.md` sample) at
 `test/fixtures/glucose/upstream-ok.json`. It is health data of the developer: fine for a private fixture,

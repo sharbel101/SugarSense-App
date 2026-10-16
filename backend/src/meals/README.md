@@ -101,3 +101,13 @@ failure can never be mistaken for a real (possibly low-carb) estimate.
   calls for a real harness: a kitchen scale, ~20 actually-weighed meals, real device photos (not stock
   images), and comparing the model's stated range against the true weighed value - that is a separate,
   valuable follow-up task, not done here.
+
+## Access control (added 2026-10-16)
+
+- Optional shared secret: when the server sets `APP_API_TOKEN`, requests must carry header `X-App-Token`
+  (otherwise HTTP 401 `{ "status": "unauthorized" }`). Unset = open. A token in the public web bundle is
+  not secret; this is bot protection, not user auth.
+- Rate limit (Gemini quota): default 10 requests per client address and 30 in total per 10 minutes
+  (`RATE_LIMIT_MEALS_PER_IP`, `RATE_LIMIT_MEALS_GLOBAL`). Exceeding it returns HTTP 429
+  `{ "status": "rate_limited", "retryAfterSeconds": n }` plus `Retry-After`. The UI should show
+  "try again in a minute" and offer manual entry.

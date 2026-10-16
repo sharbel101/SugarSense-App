@@ -7,6 +7,9 @@ async function bootstrap() {
   // POST /meals/analyze accepts a base64-encoded photo as JSON; Nest's default body-parser limit
   // (~100kb) is too small for that. 15mb comfortably covers a resized 1024px JPEG q80 photo
   // (CLAUDE.md section 9) inflated ~33% by base64, with headroom.
+  // Only trust X-Forwarded-For from loopback proxies (nginx/tunnels on this host), so req.ip is the
+  // address nginx saw and a client cannot pick its own rate-limit key.
+  app.set('trust proxy', 'loopback');
   app.useBodyParser('json', { limit: '15mb' });
   // Dev CORS for browser clients: the Expo web dev server (Metro) runs on http://localhost:8081.
   // Native builds are not subject to CORS. Override with CORS_ORIGINS=origin1,origin2.
