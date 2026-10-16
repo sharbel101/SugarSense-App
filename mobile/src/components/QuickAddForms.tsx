@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { apiContext } from '../api/apiContext';
 import { getTherapySettings } from '../api/therapyApi';
 import {
@@ -24,7 +24,7 @@ import type { EventRecord } from '../services/eventQueue';
 import { useEvents } from '../services/EventsProvider';
 import { mealChoices, type MealRef } from '../services/mealRefs';
 import { PENDING_MESSAGE, savedMessage } from '../services/forecastView';
-import { radius, useColors } from '../theme';
+import { radius, touch, useColors } from '../theme';
 import { PrimaryButton, SecondaryButton } from './Buttons';
 import { CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
 
@@ -37,6 +37,29 @@ function ErrorSummary({ errors }: { errors: Record<string, string | undefined> }
     <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>
       Some fields need your attention. Scroll up to fix them, then save again.
     </Text>
+  );
+}
+
+/** Collapsed by default so the one required number is always visible without scrolling. */
+function MoreDetails({ children, forceOpen }: { children: React.ReactNode; forceOpen: boolean }) {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const shown = open || forceOpen;
+  return (
+    <View style={{ gap: 14 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        aria-expanded={shown}
+        accessibilityLabel={shown ? 'Hide extra details' : 'Add more details: time, notes and more'}
+        style={{ minHeight: touch.min, justifyContent: 'center' }}
+      >
+        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.blue600 }}>
+          {shown ? 'Fewer details ▲' : 'More details (time, notes...) ▼'}
+        </Text>
+      </Pressable>
+      {shown ? children : null}
+    </View>
   );
 }
 
@@ -174,20 +197,26 @@ export function MealForm({ onDone }: { onDone: () => void }) {
           onSendNow={sendNow}
         />
       ) : null}
-      <FormField label="Carbohydrates" required value={carbs} onChangeText={setCarbs} unit="g" keyboardType="decimal-pad" placeholder="e.g. 45" error={errors.carbs} />
-      <FormField label="Meal description (optional)" value={label} onChangeText={setLabel} placeholder="e.g. Pasta" maxLength={80} />
-      <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
-      <CheckRow checked={approximate} onChange={setApproximate} label="The time is approximate" />
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>How fast does it hit? (optional)</Text>
-        <ChoiceChips options={ABSORPTION_OPTIONS} value={absorption} onChange={setAbsorption} />
-      </View>
-      <FormField label="Fat (optional)" value={fat} onChangeText={setFat} unit="g" keyboardType="decimal-pad" error={errors.fat} />
-      <FormField label="Protein (optional)" value={protein} onChangeText={setProtein} unit="g" keyboardType="decimal-pad" error={errors.protein} />
-      <FormField label="Fibre (optional)" value={fiber} onChangeText={setFiber} unit="g" keyboardType="decimal-pad" error={errors.fiber} />
-      <FormField label="Notes (optional)" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
-      <ErrorSummary errors={errors} />
-      {!record ? <PrimaryButton label="Save carbs" onPress={submit} /> : null}
+      {!record ? (
+        <>
+          <FormField label="Carbohydrates" required value={carbs} onChangeText={setCarbs} unit="g" keyboardType="decimal-pad" placeholder="e.g. 45" error={errors.carbs} />
+          <PrimaryButton label="Save carbs" onPress={submit} />
+          <ErrorSummary errors={errors} />
+          <MoreDetails forceOpen={Boolean(errors.time || errors.fat || errors.protein || errors.fiber || errors.notes)}>
+            <FormField label="Meal description" value={label} onChangeText={setLabel} placeholder="e.g. Pasta" maxLength={80} />
+            <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
+            <CheckRow checked={approximate} onChange={setApproximate} label="The time is approximate" />
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>How fast does it hit?</Text>
+              <ChoiceChips options={ABSORPTION_OPTIONS} value={absorption} onChange={setAbsorption} />
+            </View>
+            <FormField label="Fat" value={fat} onChangeText={setFat} unit="g" keyboardType="decimal-pad" error={errors.fat} />
+            <FormField label="Protein" value={protein} onChangeText={setProtein} unit="g" keyboardType="decimal-pad" error={errors.protein} />
+            <FormField label="Fibre" value={fiber} onChangeText={setFiber} unit="g" keyboardType="decimal-pad" error={errors.fiber} />
+            <FormField label="Notes" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
+          </MoreDetails>
+        </>
+      ) : null}
     </>
   );
 }
@@ -287,43 +316,42 @@ export function InsulinForm({ onDone, preselectMeal, initialKind }: { onDone: ()
           onSendNow={sendNow}
         />
       ) : null}
-      <Helper>Record only insulin you actually took. SugarSense does not tell you how much to take.</Helper>
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>What was it for?</Text>
-        <ChoiceChips options={INSULIN_KINDS} value={insulinKind} onChange={setInsulinKind} />
-      </View>
-      <FormField label="Insulin units" required value={units} onChangeText={setUnits} unit="U" keyboardType="decimal-pad" placeholder="e.g. 4" error={errors.units} />
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>Insulin type *</Text>
-        <ChoiceChips
-          options={INSULIN_TYPES}
-          value={insulinType ?? ('' as InsulinType)}
-          onChange={setPickedType}
-        />
-        {errors.insulinType ? (
-          <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.red600 }}>
-            {errors.insulinType}
-          </Text>
-        ) : null}
-        <Helper>Only rapid-acting and ultra-rapid insulin count as meal or correction insulin in the forecast.</Helper>
-        {notMealActing ? <Helper>This type is saved and shown, but it is not used as a meal or correction dose.</Helper> : null}
-      </View>
-      {insulinKind === 'bolus' ? (
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>For which meal? (optional)</Text>
-          <ChoiceChips options={mealOptions} value={chosenMeal?.key ?? ''} onChange={(v) => setMealKey(v === '' ? null : v)} />
-          <Helper>Choosing the meal removes guesswork. If you skip it, the server only links a dose to a meal when it is unambiguous.</Helper>
-        </View>
+      {!record ? (
+        <>
+          <FormField label="Insulin units" required value={units} onChangeText={setUnits} unit="U" keyboardType="decimal-pad" placeholder="e.g. 4" error={errors.units} />
+          <View style={{ gap: 8 }}>
+            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>Insulin type *</Text>
+            <ChoiceChips options={INSULIN_TYPES} value={insulinType ?? ('' as InsulinType)} onChange={setPickedType} />
+            {errors.insulinType ? (
+              <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.red600 }}>
+                {errors.insulinType}
+              </Text>
+            ) : null}
+            {notMealActing ? <Helper>Saved and shown, but not used as a meal or correction dose.</Helper> : null}
+          </View>
+          <CheckRow checked={confirmedTaken} onChange={setConfirmedTaken} label="I confirm I actually took this insulin" error={errors.confirmedTaken} />
+          <PrimaryButton label="Save insulin record" onPress={submit} />
+          <ErrorSummary errors={errors} />
+          <MoreDetails forceOpen={Boolean(errors.time || errors.notes || errors.glucose)}>
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>What was it for?</Text>
+              <ChoiceChips options={INSULIN_KINDS} value={insulinKind} onChange={setInsulinKind} />
+            </View>
+            {insulinKind === 'bolus' ? (
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>For which meal?</Text>
+                <ChoiceChips options={mealOptions} value={chosenMeal?.key ?? ''} onChange={(v) => setMealKey(v === '' ? null : v)} />
+              </View>
+            ) : null}
+            {insulinKind === 'correction' ? (
+              <FormField label="Glucose at the time (stays on this device)" value={glucose} onChangeText={setGlucose} unit="mg/dL" keyboardType="decimal-pad" error={errors.glucose} />
+            ) : null}
+            <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
+            <CheckRow checked={notSure} onChange={setNotSure} label="I'm not sure of the amount or time" />
+            <FormField label="Notes (stays on this device)" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
+          </MoreDetails>
+        </>
       ) : null}
-      {insulinKind === 'correction' ? (
-        <FormField label="Glucose at the time (optional, stays on this device)" value={glucose} onChangeText={setGlucose} unit="mg/dL" keyboardType="decimal-pad" error={errors.glucose} />
-      ) : null}
-      <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
-      <CheckRow checked={notSure} onChange={setNotSure} label="I'm not sure of the amount or time" />
-      <FormField label="Notes (optional, stays on this device)" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
-      <CheckRow checked={confirmedTaken} onChange={setConfirmedTaken} label="I confirm I actually took this insulin" error={errors.confirmedTaken} />
-      <ErrorSummary errors={errors} />
-      {!record ? <PrimaryButton label="Save insulin record" onPress={submit} /> : null}
     </>
   );
 }
