@@ -8,12 +8,10 @@ import { GlucoseChart } from '../components/GlucoseChart';
 import { GlucoseStatus } from '../components/GlucoseStatus';
 import { Icon } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
-import { latestMeal, wearableNormal } from '../data/mockData';
 import { buildGlucoseChart } from '../services/glucoseChart';
 import { summariseRisk } from '../services/glucoseRisk';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
-import { manualConfirmedMeal } from '../services/mealService';
 import { radius, spacing, useColors } from '../theme';
 import { TabScreenProps } from '../navigation/types';
 
@@ -145,17 +143,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
         </Card>
 
-        <Card
-          // "Latest meal" has no real history store yet (out of scope here) - this still just
-          // reopens the mock summary below, now carrying the ConfirmedMeal shape PostMeal expects.
-          onPress={() =>
-            navigation.navigate('Scan', {
-              screen: 'PostMeal',
-              params: { meal: { ...manualConfirmedMeal(latestMeal.carbs), label: latestMeal.name } },
-            })
-          }
-          accessibilityLabel="View latest meal"
-        >
+        <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconChip bg={colors.amber100}>
               <Icon name="fork" size={19} color={colors.amber600} />
@@ -163,10 +151,9 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Latest meal</Text>
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                {latestMeal.name} · Est. {latestMeal.carbs}g carbs
+                No meal history yet.
               </Text>
             </View>
-            <Icon name="chevronRight" size={18} color={colors.ink4} />
           </View>
         </Card>
 
@@ -176,13 +163,9 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
               <Icon name="heart" size={19} color={colors.purple600} />
             </IconChip>
             <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Wearable</Text>
-                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green600 }} />
-                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: colors.green600 }}>Connected</Text>
-              </View>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Wearable</Text>
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                HR {wearableNormal.hr} bpm · Data quality good
+                No wearable connected.
               </Text>
             </View>
           </View>

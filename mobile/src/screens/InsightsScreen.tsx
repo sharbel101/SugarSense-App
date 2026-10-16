@@ -3,10 +3,8 @@ import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
-import { GhostButton } from '../components/Buttons';
 import { Icon } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
-import { insights } from '../data/mockData';
 import { TabScreenProps } from '../navigation/types';
 import { useGlucose } from '../services/GlucoseProvider';
 import { spacing, useColors } from '../theme';
@@ -35,22 +33,17 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
       </Text>
 
       <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
-        {insights.map((item) => (
-          <Card key={item.title}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.purple100, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="sparkle" size={16} color={colors.purple600} />
-              </View>
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>{item.title}</Text>
+        <Card>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.purple100, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="sparkle" size={16} color={colors.purple600} />
             </View>
-            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>{item.text}</Text>
-            <GhostButton
-              label="Why am I seeing this?"
-              onPress={() => {}}
-              icon={<Icon name="chevronRight" size={13} color={colors.blue600} />}
-            />
-          </Card>
-        ))}
+            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>No insights yet</Text>
+          </View>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>
+            Observations will appear here once there is enough of your own data to base them on.
+          </Text>
+        </Card>
       </PullToRefreshScrollView>
     </SafeAreaView>
   );
