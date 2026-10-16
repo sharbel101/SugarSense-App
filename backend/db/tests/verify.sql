@@ -37,8 +37,9 @@ SELECT public.t_expect('external_id uniqueness', format($q$INSERT INTO glucose_r
 -- unknown vs confirmed zero
 SELECT public.t_expect('meal with unknown carbs allowed as draft', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at) VALUES (%L, gen_random_uuid(), now())$q$, :'u_user_id'), 'OK');
 SELECT public.t_expect('confirmed meal needs carbs (NULL is not zero)', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, status) VALUES (%L, gen_random_uuid(), now(), 'confirmed')$q$, :'u_user_id'), '23514');
-SELECT public.t_expect('confirmed zero-carb meal allowed', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, status, carbs_g) VALUES (%L, gen_random_uuid(), now(), 'confirmed', 0)$q$, :'u_user_id'), 'OK');
-SELECT public.t_expect('carbs above 400 g rejected', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, carbs_g) VALUES (%L, gen_random_uuid(), now(), 401)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('confirmed zero-carb meal allowed', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, status, carbs_g, carbs_provenance) VALUES (%L, gen_random_uuid(), now(), 'confirmed', 0, 'user_entered')$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('a carbohydrate number without a provenance label is rejected (0006)', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, carbs_g) VALUES (%L, gen_random_uuid(), now(), 30)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('carbs above 400 g rejected', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, carbs_g, carbs_provenance) VALUES (%L, gen_random_uuid(), now(), 401, 'user_entered')$q$, :'u_user_id'), '23514');
 SELECT public.t_expect('meal client_uuid idempotency', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at) VALUES (%1$L, '11111111-1111-1111-1111-111111111111', now()), (%1$L, '11111111-1111-1111-1111-111111111111', now())$q$, :'u_user_id'), '23505');
 SELECT public.t_expect('meal item + update + delete by app role', format($q$
   WITH m AS (INSERT INTO meal_events (user_id, client_uuid, eaten_at) VALUES (%L, gen_random_uuid(), now()) RETURNING meal_id),
@@ -50,6 +51,8 @@ SELECT public.t_expect('app role can DELETE meal_items', $q$DELETE FROM meal_ite
 -- suggestion is not a dose
 SELECT public.t_expect('uncertain insulin event with unknown dose allowed', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, units_suggested) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 5.5)$q$, :'u_user_id'), 'OK');
 SELECT public.t_expect('confirmed insulin event requires units_administered', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_suggested) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'confirmed', 5.5)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('a planned dose cannot carry an administered amount (0006)', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_administered) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'planned', 4)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('a planned dose with only the planned amount is allowed (0006)', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_suggested) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'planned', 4)$q$, :'u_user_id'), 'OK');
 SELECT public.t_expect('confirmed zero-unit dose allowed', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_administered) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'confirmed', 0)$q$, :'u_user_id'), 'OK');
 
 -- activity / sleep
@@ -83,6 +86,21 @@ SELECT public.t_expect('app role may NOT change parameter value', $q$UPDATE mode
 SELECT public.t_expect('performance row with no samples (metrics NULL) allowed', format($q$INSERT INTO model_performance (user_id, model_version, horizon_min, window_start, window_end, sample_count) VALUES (%L, 'direct_120', 30, '2026-10-01', '2026-10-08', 0)$q$, :'u_user_id'), 'OK');
 SELECT public.t_expect('context row: coverage 0 is a fact, NULL wearables allowed', format($q$INSERT INTO context_features (user_id, feature_at, hour_sin, hour_cos, wearable_coverage) VALUES (%L, now(), 0.5, 0.866, 0)$q$, :'u_user_id'), 'OK');
 
+-- 0006: therapy settings and forecast runs
+INSERT INTO therapy_profiles (user_id, version, effective_from, source) VALUES (:'u_user_id', 1, now(), 'user_entered') RETURNING profile_id \gset t_
+SELECT public.t_expect('ICR segment inserted', format($q$INSERT INTO therapy_segments (profile_id, kind, start_minute, value) VALUES (%L, 'icr', 0, 10)$q$, :'t_profile_id'), 'OK');
+SELECT public.t_expect('ICR of zero rejected', format($q$INSERT INTO therapy_segments (profile_id, kind, start_minute, value) VALUES (%L, 'icr', 60, 0)$q$, :'t_profile_id'), '23514');
+SELECT public.t_expect('ICR above 150 g/U rejected', format($q$INSERT INTO therapy_segments (profile_id, kind, start_minute, value) VALUES (%L, 'icr', 120, 400)$q$, :'t_profile_id'), '23514');
+SELECT public.t_expect('the same segment twice rejected', format($q$INSERT INTO therapy_segments (profile_id, kind, start_minute, value) VALUES (%L, 'icr', 0, 11)$q$, :'t_profile_id'), '23505');
+SELECT public.t_expect('two profiles with the same version rejected', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source) VALUES (%L, 1, now(), 'user_entered')$q$, :'u_user_id'), '23505');
+SELECT public.t_expect('a therapy setting cannot be edited (new version instead)', $q$UPDATE therapy_segments SET value = 99$q$, '42501');
+SELECT public.t_expect('a therapy setting cannot be deleted', $q$DELETE FROM therapy_profiles$q$, '42501');
+
+-- 0007: meal label and insulin status
+SELECT public.t_expect('a meal label of 1-80 characters is allowed', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, label) VALUES (%L, gen_random_uuid(), now(), 'Pasta')$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('an empty meal label is rejected', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, label) VALUES (%L, gen_random_uuid(), now(), '   ')$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('an insulin entry can be cancelled (status change)', format($q$WITH i AS (INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_administered) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'confirmed', 2) RETURNING insulin_id) UPDATE insulin_events SET status = 'cancelled' WHERE insulin_id IN (SELECT insulin_id FROM i)$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('an unknown insulin status is rejected', format($q$INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, source, confirmation, units_administered, status) VALUES (%L, gen_random_uuid(), now(), 'bolus', 'manual', 'confirmed', 2, 'deleted')$q$, :'u_user_id'), '23514');
 -- privileges
 SELECT public.t_expect('app role cannot DDL', $q$CREATE TABLE should_not_exist (a int)$q$, '42501');
 SELECT public.t_expect('app role cannot TRUNCATE', $q$TRUNCATE glucose_readings$q$, '42501');

@@ -1,8 +1,8 @@
 # SugarSense database (PostgreSQL 16 on the Oracle VM)
 
-Status 2026-10-16: installed, migrated (0001-0005) and verified on the VM. **Nothing in the Nest backend reads
-or writes it yet** (persistence of meals/glucose/predictions is the next step; the ORM choice is still open in
-`../../CLAUDE.md` section 15). No real data is in it.
+Status 2026-10-16: installed, migrated (0001-0006) and verified on the VM. The meal-aware forecasting code in
+`src/forecasting` uses it (see `src/forecasting/README.md`); it is **not deployed yet**, so the running backend still
+ignores it. No real data is in it.
 
 ## Layout
 
@@ -92,3 +92,16 @@ Never `dropdb sugarsense` without a verified dump.
   `backend/.env` for that process.
 - Auth/consent tables (`care_relationship`, `audit_log`) and `therapy_settings`/`sensor_*` are not created yet.
 - `users.timezone` is length-checked only; validate the IANA name in the app.
+
+## Migration 0006 (meal-aware forecasting)
+
+Adds versioned therapy settings (`therapy_profiles`, `therapy_segments`: ICR in grams per unit and ISF in mg/dL per unit by
+local time of day), meal provenance / timing / revision columns, the `planned` insulin state, `forecast_runs`,
+`prediction_event_links`, `event_revisions`, and the ICR / ISF / therapy-version columns on `predictions`. Applied to the
+production database on 2026-10-16 after a backup; the database was empty, nothing was altered or deleted.
+
+`0007` adds `meal_events.label` (1-80 characters) and `insulin_events.status` (`active` / `cancelled`; a mistaken entry is withdrawn, never deleted).
+
+Tests: `db/tests/verify.sql` (57 checks as the application role) and `verify_owner.sql` (6) both pass on the production schema;
+the application-level suite (`src/forecasting/*.spec.ts`) runs against the scratch database `sugarsense_test` with
+`~/sugarsense-test-db.env` (not in git). Drop and recreate that database to start clean.
