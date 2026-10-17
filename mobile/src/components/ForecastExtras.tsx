@@ -103,7 +103,6 @@ export function OnBoardChips({ forecast }: { forecast: ForecastOkDisplay }) {
         <Chip chip={formatInsulinOnBoard(a)} onPress={() => setOpen((v) => !v)} active={open} />
         <Chip chip={formatCarbsOnBoard(a)} onPress={() => setOpen((v) => !v)} active={open} />
       </View>
-      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3 }}>as of {formatClock(forecast.anchor.measuredAt)}</Text>
       {open ? <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>{ON_BOARD_EXPLAINER}</Text> : null}
     </View>
   );
@@ -161,13 +160,25 @@ export function ForecastLegend({ chart }: { chart: ForecastChartModel }) {
     </View>
   );
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 10 }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 4, marginTop: 8 }}>
       {item(colors.blue700, 'Measured', 'line')}
-      {item(colors.blue500, 'Forecast (includes what you logged)', 'dash')}
-      {chart.hasBaselineLine ? item(colors.ink4, 'Glucose-only forecast', 'line') : null}
-      {chart.hasBand ? item(colors.blue500, '80% predicted range', 'band') : null}
+      {item(colors.blue500, 'Forecast', 'dash')}
+      {chart.hasBaselineLine ? item(colors.ink4, 'Glucose-only', 'line') : null}
+      {chart.hasBand ? item(colors.blue500, '80% range', 'band') : null}
     </View>
   );
+}
+
+/** "Based on 1 meal and 1 insulin dose you logged." - counts straight from the server's availability. */
+function basedOn(f: ForecastOkDisplay): string {
+  const a = f.mealAware.availability;
+  const meals = a.mealsUsed + a.mealsRangeOnly;
+  const doses = a.insulinDosesUsed + a.insulinDosesRangeOnly;
+  if (meals + doses === 0) return 'Based on your glucose history. Nothing logged is included.';
+  const parts: string[] = [];
+  if (meals > 0) parts.push(`${meals} meal${meals === 1 ? '' : 's'}`);
+  if (doses > 0) parts.push(`${doses} insulin dose${doses === 1 ? '' : 's'}`);
+  return `Based on ${parts.join(' and ')} you logged.`;
 }
 
 /** Quiet status lines, notes and the disclaimer under the chart. */
@@ -182,7 +193,8 @@ export function ForecastFooter({ state }: { state: ForecastChartState }) {
       {state.fallback ? <Text style={small}>Meal and insulin entries are not included right now.</Text> : null}
       {state.noForecastReason ? <Text style={small}>{state.noForecastReason}</Text> : null}
       {f && f.saved === false && !f.mealAware.counterfactual ? <Text style={small}>This forecast was not saved to your history.</Text> : null}
-      {f && state.chart?.hasExtension ? <Text style={small}>After 2 hours, only your logged meals and insulin move the line.</Text> : null}
+      {f ? <Text style={small}>{basedOn(f)} As of {formatClock(f.anchor.measuredAt)}.</Text> : null}
+      {f && state.chart?.hasExtension ? <Text style={small}>After 2 h only what you logged moves the line.</Text> : null}
       {f && f.notes.length > 0 ? (
         <>
           <Pressable
@@ -209,7 +221,7 @@ export function ForecastFooter({ state }: { state: ForecastChartState }) {
  * 3-hour forecast when it is usable; otherwise falls back to the glucose-only line from GET /glucose
  * (the previous behaviour) and says that meal and insulin entries are not included.
  */
-export function ForecastChartBlock({ data, height }: { data: GlucoseOk; height: number }) {
+export function ForecastChartBlock({ data, height, compact = false }: { data: GlucoseOk; height: number; compact?: boolean }) {
   const colors = useColors();
   const state = useForecastChart(data);
   const old = useMemo(() => buildGlucoseChart(data), [data]);
@@ -218,8 +230,8 @@ export function ForecastChartBlock({ data, height }: { data: GlucoseOk; height: 
   const common = { viewBoxWidth: old.viewBoxWidth, viewBoxHeight: old.viewBoxHeight, height };
   return (
     <View>
-      {state.forecast ? <ForecastPrompts forecast={state.forecast} /> : null}
-      <View style={{ marginTop: state.forecast ? 12 : 0 }}>
+      {state.forecast && !compact ? <ForecastPrompts forecast={state.forecast} /> : null}
+      <View style={{ marginTop: state.forecast && !compact ? 12 : 0 }}>
         {fc && state.forecast ? (
           <GlucoseChart
             {...common}
@@ -265,7 +277,7 @@ export function ForecastChartBlock({ data, height }: { data: GlucoseOk; height: 
             : `Forecast unavailable${data.forecastUnavailableReason ? `: ${data.forecastUnavailableReason}` : '.'}`}
         </Text>
       )}
-      {state.forecast ? (
+      {state.forecast && !compact ? (
         <View style={{ marginTop: 12 }}>
           <OnBoardChips forecast={state.forecast} />
         </View>

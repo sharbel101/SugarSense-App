@@ -31,6 +31,34 @@
           background-color: #121212;
         }
       }
+      /* Phone-app behaviour on the web build:
+         - touch-action: manipulation removes the double-tap-to-zoom delay and the accidental zoom
+           when two quick taps land on a button, but KEEPS pinch zoom (accessibility zoom stays).
+         - text selection is off for the app chrome (dragging across a chart or card must never
+           select it); form fields stay selectable.
+         - no grey tap flash, no callout menu on long press. */
+      html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
+      body {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      input,
+      textarea {
+        -webkit-user-select: text;
+        user-select: text;
+        /* iOS Safari zooms the page when a focused field's text is smaller than 16px. */
+        font-size: 16px;
+      }
+      svg {
+        -webkit-user-select: none;
+        user-select: none;
+      }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {
         overflow: hidden;

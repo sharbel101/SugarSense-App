@@ -142,6 +142,13 @@ export function resolveEventTime(choice: TimeChoice, now: Date): ResolvedTime | 
   return { utcIso: at.toISOString(), utcOffsetMin };
 }
 
+/** 24-hour "HH:MM" in local time, the format the typed-time field expects. */
+export function toHhmm(utcIso: string): string {
+  const d = new Date(utcIso);
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 export function formatEventTime(utcIso: string): string {
   const d = new Date(utcIso);
   if (!Number.isFinite(d.getTime())) return '';

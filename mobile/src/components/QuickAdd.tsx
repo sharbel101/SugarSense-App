@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { InsulinKind } from '../services/events';
 import { useEvents } from '../services/EventsProvider';
 import { useForecast } from '../services/ForecastProvider';
+import { useAvailableHeight } from '../services/useAvailableHeight';
 import { findMealRef, type MealRef } from '../services/mealRefs';
 import { forecastPrompts } from '../services/forecastView';
 import { radius, shadow, spacing, touch, useColors } from '../theme';
@@ -44,6 +45,12 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
 /** Distance from the screen bottom that clears the floating tab bar (72 dp bar + its padding). One place, not per screen. */
 export const TAB_BAR_CLEARANCE = 96;
 
+/** Bottom padding for a tab screen's scroll content so its last card clears the floating tab bar (and the safe area). */
+export function useTabScreenBottomPadding(): number {
+  const insets = useSafeAreaInsets();
+  return insets.bottom + TAB_BAR_CLEARANCE + 24;
+}
+
 /** The persistent "+" button. Rendered once at the navigator root so it floats over every main screen. */
 export function QuickAddFab({ hidden }: { hidden: boolean }) {
   const colors = useColors();
@@ -79,6 +86,7 @@ export function QuickAddFab({ hidden }: { hidden: boolean }) {
 function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const available = useAvailableHeight();
   const [mode, setMode] = useState<QuickAddMode>(options.mode ?? 'menu');
   const [meal, setMeal] = useState<MealRef | undefined>(options.meal);
 
@@ -105,7 +113,9 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
               backgroundColor: colors.ground,
               borderTopLeftRadius: radius.hero,
               borderTopRightRadius: radius.hero,
-              maxHeight: '92%',
+              // A real pixel cap (a percentage of an auto-height parent caps nothing): the sheet can never
+              // grow past the top of the screen, and its ScrollView scrolls inside it.
+              maxHeight: Math.max(240, Math.floor(available - insets.top - 12)),
               paddingBottom: Math.max(insets.bottom, spacing.md),
             }}
           >
@@ -130,7 +140,10 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
                 <Icon name="close" size={20} color={colors.ink2} />
               </Pressable>
             </View>
+            {/* key = mode: each step starts at the top (a reused ScrollView kept the previous form's scroll offset). */}
             <ScrollView
+              key={mode}
+              style={{ flexGrow: 0 }}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingBottom: spacing.lg, gap: 14 }}
             >

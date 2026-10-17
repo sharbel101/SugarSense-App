@@ -23,6 +23,7 @@ export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList>;
   Profile: undefined;
   InsulinSettings: undefined;
+  MealHistory: undefined;
 };
 
 declare global {

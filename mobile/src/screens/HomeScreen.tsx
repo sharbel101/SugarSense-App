@@ -1,21 +1,22 @@
 import React, { useEffect, useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
-import { Chip } from '../components/Chip';
-import { ForecastChartBlock } from '../components/ForecastExtras';
+import { GlucoseChart } from '../components/GlucoseChart';
 import { GlucoseStatus } from '../components/GlucoseStatus';
-import { Icon } from '../components/Icon';
+import { Icon, IconName } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
+import { useQuickAdd, useTabScreenBottomPadding } from '../components/QuickAdd';
+import { TabScreenProps } from '../navigation/types';
+import { useEvents } from '../services/EventsProvider';
+import { formatEventTime } from '../services/events';
 import { buildGlucoseChart } from '../services/glucoseChart';
 import { summariseRisk } from '../services/glucoseRisk';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
-import { useQuickAdd } from '../components/QuickAdd';
-import { useEvents } from '../services/EventsProvider';
-import { radius, spacing, useColors } from '../theme';
-import { TabScreenProps } from '../navigation/types';
+import { activeMeals, carbsText, dayKey, mealTitle, trendDisplay } from '../services/mealHistory';
+import { radius, spacing, touch, useColors } from '../theme';
 
 function greeting() {
   const hour = new Date().getHours();
@@ -24,28 +25,52 @@ function greeting() {
   return 'Good evening';
 }
 
+const MEALS_SHOWN = 3;
+const ACTIVITY_SHOWN = 4;
+
+/** Home = what is happening right now: glucose, alerts, quick actions, today's meals, recent activity. */
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const colors = useColors();
+  const bottomPad = useTabScreenBottomPadding();
   const { view, refresh, refreshing } = useGlucose();
   const { recent, refreshRecent, pendingCount } = useEvents();
   const { open: openQuickAdd } = useQuickAdd();
+
   useEffect(() => {
     refreshRecent();
   }, [refreshRecent]);
-  const summary = (() => {
-    const meals = recent.kind === 'ok' ? recent.meals.filter((m) => m.status !== 'cancelled').length : 0;
-    const doses = recent.kind === 'ok' ? recent.insulin.length : 0;
-    const parts: string[] = [];
-    if (recent.kind === 'ok') parts.push(meals + doses === 0 ? 'Nothing logged in the last 12 hours.' : `${meals} meal${meals === 1 ? '' : 's'}, ${doses} insulin record${doses === 1 ? '' : 's'} in the last 12 hours.`);
-    else if (recent.kind === 'unavailable') parts.push('The list from the server is not available right now.');
-    else parts.push('Use + to add carbs or insulin.');
-    if (pendingCount > 0) parts.push(`${pendingCount} not sent yet.`);
-    return parts.join(' ');
-  })();
+
   const okData = view.kind === 'ok' ? view.data : null;
   const chart = useMemo(() => (okData ? buildGlucoseChart(okData) : null), [okData]);
   const risk = useMemo(() => (okData ? summariseRisk(okData) : null), [okData]);
+  const trend = okData ? trendDisplay(okData.trendMgdlPerMin) : null;
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  const todaysMeals = useMemo(() => {
+    if (recent.kind !== 'ok') return [];
+    const key = dayKey(new Date());
+    return activeMeals(recent.meals)
+      .filter((m) => dayKey(new Date(m.eatenAt)) === key)
+      .sort((a, b) => Date.parse(b.eatenAt) - Date.parse(a.eatenAt));
+  }, [recent]);
+  const todaysCarbs = useMemo(() => {
+    const known = todaysMeals.filter((m) => m.carbs.grams !== null);
+    return known.length > 0 ? known.reduce((s, m) => s + (m.carbs.grams as number), 0) : null;
+  }, [todaysMeals]);
+
+  const activity = useMemo(() => {
+    if (recent.kind !== 'ok') return [];
+    const rows: { key: string; icon: IconName; title: string; time: string }[] = [];
+    for (const m of activeMeals(recent.meals)) {
+      rows.push({ key: m.id, icon: 'fork', title: `${mealTitle(m)} · ${carbsText(m)}`, time: m.eatenAt });
+    }
+    for (const i of recent.insulin) {
+      if (i.status === 'cancelled') continue;
+      const title = i.confirmation === 'planned' ? 'Insulin planned (not taken)' : i.unitsTaken === 0 ? 'No insulin taken' : i.unitsTaken === null ? 'Insulin' : `Insulin ${i.unitsTaken} U`;
+      rows.push({ key: i.id, icon: 'droplet', title, time: i.administeredAt });
+    }
+    return rows.sort((a, b) => Date.parse(b.time) - Date.parse(a.time)).slice(0, ACTIVITY_SHOWN);
+  }, [recent]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>
@@ -63,9 +88,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 20, color: colors.ink }}>
             {greeting()}
           </Text>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, marginTop: 2 }}>
-            {today}
-          </Text>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink3, marginTop: 2 }}>{today}</Text>
         </View>
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
@@ -73,8 +96,9 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
       <PullToRefreshScrollView
         onRefresh={refresh}
         refreshing={refreshing}
-        contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}
+        contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}
       >
+        {/* 1. Current glucose */}
         <Card elevated>
           {view.kind === 'ok' && okData && chart ? (
             <>
@@ -85,21 +109,40 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                 >
                   {Math.round(okData.glucoseMgdl)}
                 </Text>
-                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>
-                  mg/dL
-                </Text>
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>mg/dL</Text>
+                {trend ? (
+                  <Text
+                    accessibilityLabel={trend.text}
+                    style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 34, color: colors.ink, marginBottom: 2, marginLeft: 4 }}
+                  >
+                    {trend.arrow}
+                  </Text>
+                ) : null}
               </View>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 4 }}>
+              {trend ? (
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, marginTop: 2 }}>{trend.text}</Text>
+              ) : null}
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 2 }}>
                 Updated {formatAge(view.ageMinutes)} · measured {formatClock(okData.measuredAt)}
               </Text>
               {view.refreshFailed ? (
-                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.amberDark, marginTop: 4 }}>
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.amberDark, marginTop: 4 }}>
                   Couldn&apos;t refresh - showing the previous reading.
                 </Text>
               ) : null}
-
-              <View style={{ marginTop: 18 }}>
-                <ForecastChartBlock data={okData} height={150} />
+              <View style={{ marginTop: 12 }}>
+                <GlucoseChart
+                  viewBoxWidth={chart.viewBoxWidth}
+                  viewBoxHeight={chart.viewBoxHeight}
+                  actual={chart.actual}
+                  predicted={[]}
+                  nowX={chart.nowX}
+                  gridLinesY={chart.gridLinesY}
+                  xTicks={chart.xTicks.filter((t) => !t.label.startsWith('+'))}
+                  yTicks={chart.yTicks}
+                  height={96}
+                  accessibilityLabel={`Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre.`}
+                />
               </View>
             </>
           ) : view.kind === 'ok' ? null : (
@@ -107,56 +150,137 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           )}
         </Card>
 
-        <Card onPress={() => navigation.navigate('Safety')} accessibilityLabel="Open Safety">
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconChip bg={risk?.alerting ? colors.amber100 : colors.blue100}>
-              <Icon
-                name={risk?.alerting ? 'alertTriangle' : 'shield'}
-                size={19}
-                color={risk?.alerting ? colors.amber600 : colors.blue600}
-              />
-            </IconChip>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Safety</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                {risk ? risk.lines.join(' ') : 'Risk signal unavailable without a recent reading.'}
-              </Text>
+        {/* 2. Important alerts - only when there is one */}
+        {risk?.alerting ? (
+          <Card onPress={() => navigation.navigate('Safety')} accessibilityLabel="Open Safety">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <IconChip bg={colors.amber100}>
+                <Icon name="alertTriangle" size={19} color={colors.amber600} />
+              </IconChip>
+              <Text style={{ flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink, lineHeight: 21 }}>{risk.lines.join(' ')}</Text>
+              <Icon name="chevronRight" size={18} color={colors.ink4} />
             </View>
-            {risk?.alerting ? <Chip label="Alert" bg={colors.amber100} color={colors.amberDark} size="sm" /> : null}
+          </Card>
+        ) : null}
+
+        {/* 5 (moved up for reach). Quick actions */}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <ActionButton
+            label="Add meal"
+            icon="camera"
+            primary
+            onPress={() => navigation.navigate('Scan', { screen: 'Camera' })}
+          />
+          <ActionButton label="Log insulin" icon="droplet" onPress={() => openQuickAdd({ mode: 'insulin' })} />
+        </View>
+
+        {/* 3. Today's meals */}
+        <Card onPress={() => navigation.navigate('MealHistory')} accessibilityLabel="Open meal history">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+              Today&apos;s meals
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {todaysCarbs !== null ? (
+                <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink2 }}>{Math.round(todaysCarbs)} g</Text>
+              ) : null}
+              <Icon name="chevronRight" size={18} color={colors.ink4} />
+            </View>
           </View>
+          {recent.kind === 'loading' || recent.kind === 'idle' ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6 }}>Loading...</Text>
+          ) : recent.kind === 'unavailable' ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6 }}>
+              Meals are not available right now.
+            </Text>
+          ) : todaysMeals.length === 0 ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6 }}>No meals logged today.</Text>
+          ) : (
+            <View style={{ marginTop: 8, gap: 8 }}>
+              {todaysMeals.slice(0, MEALS_SHOWN).map((m) => (
+                <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: colors.ink }} numberOfLines={1}>
+                      {mealTitle(m)}
+                    </Text>
+                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>{formatEventTime(m.eatenAt)}</Text>
+                  </View>
+                  <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: colors.ink }}>
+                    {m.carbs.grams === null ? '? g' : `${Math.round(m.carbs.grams)} g`}
+                  </Text>
+                </View>
+              ))}
+              {todaysMeals.length > MEALS_SHOWN ? (
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.blue600 }}>
+                  +{todaysMeals.length - MEALS_SHOWN} more
+                </Text>
+              ) : null}
+            </View>
+          )}
         </Card>
 
-        <Card onPress={() => openQuickAdd({ mode: 'list' })} accessibilityLabel="Open what you logged today">
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconChip bg={colors.amber100}>
-              <Icon name="fork" size={19} color={colors.amber600} />
-            </IconChip>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Logged today</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                {summary}
-              </Text>
-            </View>
+        {/* 4. Recent activity */}
+        <Card onPress={() => openQuickAdd({ mode: 'list' })} accessibilityLabel="Open what you logged">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+              Recent activity
+            </Text>
             <Icon name="chevronRight" size={18} color={colors.ink4} />
           </View>
-        </Card>
-
-        <Card>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconChip bg={colors.purple100}>
-              <Icon name="heart" size={19} color={colors.purple600} />
-            </IconChip>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Wearable</Text>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 1 }}>
-                No wearable connected.
-              </Text>
+          {pendingCount > 0 ? (
+            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.amberDark, marginTop: 6 }}>
+              {pendingCount} not sent yet - the forecast does not include {pendingCount === 1 ? 'it' : 'them'}.
+            </Text>
+          ) : null}
+          {activity.length === 0 ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6 }}>
+              {recent.kind === 'unavailable' ? 'Not available right now.' : recent.kind === 'ok' ? 'Nothing logged recently.' : 'Loading...'}
+            </Text>
+          ) : (
+            <View style={{ marginTop: 8, gap: 8 }}>
+              {activity.map((a) => (
+                <View key={a.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon name={a.icon} size={16} color={colors.ink3} />
+                  <Text style={{ flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink }} numberOfLines={1}>
+                    {a.title}
+                  </Text>
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>{formatEventTime(a.time)}</Text>
+                </View>
+              ))}
             </View>
-          </View>
+          )}
         </Card>
       </PullToRefreshScrollView>
-
     </SafeAreaView>
+  );
+}
+
+function ActionButton({ label, icon, onPress, primary }: { label: string; icon: IconName; onPress: () => void; primary?: boolean }) {
+  const colors = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        {
+          flex: 1,
+          minHeight: touch.min + 8,
+          borderRadius: radius.row,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          backgroundColor: primary ? colors.blue600 : colors.surface,
+          borderWidth: primary ? 0 : 1,
+          borderColor: colors.border,
+        },
+        pressed ? { opacity: 0.85 } : null,
+      ]}
+    >
+      <Icon name={icon} size={20} color={primary ? colors.onBlue : colors.blue600} />
+      <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: primary ? colors.onBlue : colors.ink }}>{label}</Text>
+    </Pressable>
   );
 }
 

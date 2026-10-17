@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
+import { useTabScreenBottomPadding } from '../components/QuickAdd';
 import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { ForecastChartBlock } from '../components/ForecastExtras';
@@ -18,6 +19,7 @@ const FORECAST_MARKS = [30, 60, 120] as const;
 
 export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
   const colors = useColors();
+  const bottomPad = useTabScreenBottomPadding();
   const { view, refresh, refreshing } = useGlucose();
   const { view: forecastView } = useForecast();
   const mealAware = forecastView.kind === 'ok';
@@ -56,7 +58,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
-      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 16 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 16 }}>
         {view.kind === 'ok' && data && chart ? (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>

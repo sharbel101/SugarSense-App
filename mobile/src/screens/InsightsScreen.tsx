@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
+import { useTabScreenBottomPadding } from '../components/QuickAdd';
 import { Card } from '../components/Card';
 import { Icon } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
@@ -11,6 +12,7 @@ import { spacing, useColors } from '../theme';
 
 export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
   const colors = useColors();
+  const bottomPad = useTabScreenBottomPadding();
   const { refresh, refreshing } = useGlucose();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>
@@ -32,7 +34,7 @@ export function InsightsScreen({ navigation }: TabScreenProps<'Insights'>) {
         What SugarSense is learning about you
       </Text>
 
-      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: 14 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}>
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.purple100, alignItems: 'center', justifyContent: 'center' }}>

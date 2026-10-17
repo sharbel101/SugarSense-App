@@ -21,6 +21,8 @@ export type EditableMealAnalysis = Omit<MealAnalysisOkResponse, 'items'> & {
   items: EditableMealItem[];
   /** True once the user has changed any item - the AI's original total and range no longer apply. */
   edited: boolean;
+  /** Set when the person typed a new TOTAL; any later per-item edit clears it (the items' sum applies again). */
+  totalOverrideG?: number;
 };
 
 export function toEditable(response: MealAnalysisOkResponse): EditableMealAnalysis {
@@ -32,11 +34,19 @@ export function editItemCarbsG(analysis: EditableMealAnalysis, itemIndex: number
   const items = analysis.items.map((item, index) =>
     index === itemIndex ? { ...item, netCarbsG, edited: true } : item,
   );
-  return { ...analysis, items, edited: true };
+  const { totalOverrideG: _dropped, ...rest } = analysis;
+  void _dropped;
+  return { ...rest, items, edited: true };
+}
+
+/** Pure: the person typed a new total for the whole meal. */
+export function editTotalCarbsG(analysis: EditableMealAnalysis, totalG: number): EditableMealAnalysis {
+  return { ...analysis, totalOverrideG: totalG, edited: true };
 }
 
 /** The number the headline should show: the AI's total until the user edits an item, then the live sum. */
 export function displayTotalCarbsG(analysis: EditableMealAnalysis): number {
+  if (analysis.totalOverrideG !== undefined) return analysis.totalOverrideG;
   if (!analysis.edited) return analysis.totalNetCarbsG;
   return analysis.items.reduce((sum, item) => sum + item.netCarbsG, 0);
 }

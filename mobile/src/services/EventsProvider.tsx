@@ -103,7 +103,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
 
   const refreshRecent = useCallback(() => {
     setRecent({ kind: 'loading' });
-    void getRecent(apiContext, 12).then((r) => setRecent(r.kind === 'ok' ? r : { kind: 'unavailable' }));
+    void getRecent(apiContext, 48).then((r) => setRecent(r.kind === 'ok' ? r : { kind: 'unavailable' }));
   }, []);
 
   const flush = useCallback(

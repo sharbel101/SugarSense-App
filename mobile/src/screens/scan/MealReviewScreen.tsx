@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MealConfidence } from '../../api/mealsApi';
 import { BackButton, PrimaryButton, RoundButton, SecondaryButton } from '../../components/Buttons';
@@ -24,6 +24,7 @@ import {
 import {
   displayTotalCarbsG,
   editItemCarbsG,
+  editTotalCarbsG,
   EditableMealAnalysis,
   manualConfirmedMeal,
   MealReviewState,
@@ -47,6 +48,9 @@ const round = (value: number) => Math.round(value);
 
 export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealReview'>) {
   const colors = useColors();
+  const { height: windowHeight } = useWindowDimensions();
+  // The photo is context, the carbs number is the point: shrink it on short screens so the number stays above the footer.
+  const photoHeight = windowHeight < 700 ? 88 : 150;
   const { photo } = route.params;
 
   const [state, setState] = useState<MealReviewState>({ kind: 'uploading' });
@@ -56,6 +60,8 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
   const confirmedRef = useRef(false);
   const [attempt, setAttempt] = useState(0);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingTotal, setEditingTotal] = useState(false);
+  const [totalValue, setTotalValue] = useState('');
   const [editValue, setEditValue] = useState('');
   const [manualGrams, setManualGrams] = useState('');
   const { addEvent, adoptSavedMeal, editMeal } = useEvents();
@@ -116,6 +122,27 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
   const beginEdit = (index: number, currentGrams: number) => {
     setEditingIndex(index);
     setEditValue(String(currentGrams));
+  };
+
+  const beginEditTotal = (current: number) => {
+    setEditingIndex(null);
+    setTotalValue(String(Math.round(current * 10) / 10));
+    setEditingTotal(true);
+  };
+
+  const commitEditTotal = () => {
+    if (!editingTotal || state.kind !== 'result') {
+      setEditingTotal(false);
+      return;
+    }
+    const parsed = Number(totalValue.replace(',', '.'));
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 400) {
+      setState({ kind: 'result', analysis: editTotalCarbsG(state.analysis, parsed) });
+      setConfirmMessage(null);
+    } else {
+      setConfirmMessage('Total carbs must be a number above 0, up to 400 g. Your change was not applied.');
+    }
+    setEditingTotal(false);
   };
 
   const commitEdit = () => {
@@ -232,7 +259,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             accessible
             accessibilityRole="image"
             accessibilityLabel="Photo of your meal"
-            style={{ height: 150, borderRadius: 22, backgroundColor: colors.divider, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}
+            style={{ height: photoHeight, borderRadius: 22, backgroundColor: colors.divider, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}
           >
             {/* The photo stays visible and untouched while analyzing - just a small loading badge
                 in the corner, not a scrim covering it. */}
@@ -274,6 +301,11 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
               onEditValueChange={setEditValue}
               onBeginEdit={beginEdit}
               onCommitEdit={commitEdit}
+              editingTotal={editingTotal}
+              totalValue={totalValue}
+              onTotalValueChange={setTotalValue}
+              onBeginEditTotal={beginEditTotal}
+              onCommitEditTotal={commitEditTotal}
               mealName={mealName ?? mealLabel(state.analysis.items.map((i) => i.name))}
               onMealNameChange={setMealName}
               eatenAt={eatenAt}
@@ -358,6 +390,11 @@ function ResultContent({
   onEditValueChange,
   onBeginEdit,
   onCommitEdit,
+  editingTotal,
+  totalValue,
+  onTotalValueChange,
+  onBeginEditTotal,
+  onCommitEditTotal,
   mealName,
   onMealNameChange,
   eatenAt,
@@ -372,6 +409,11 @@ function ResultContent({
   onEditValueChange: (value: string) => void;
   onBeginEdit: (index: number, currentGrams: number) => void;
   onCommitEdit: () => void;
+  editingTotal: boolean;
+  totalValue: string;
+  onTotalValueChange: (value: string) => void;
+  onBeginEditTotal: (currentGrams: number) => void;
+  onCommitEditTotal: () => void;
   mealName: string;
   onMealNameChange: (name: string) => void;
   eatenAt: TimeChoice;
@@ -394,11 +436,40 @@ function ResultContent({
     <>
       <FormField label="Meal name" value={mealName} onChangeText={onMealNameChange} maxLength={80} />
       <Card>
-        <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          Estimated carbohydrates
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Estimated carbohydrates
+          </Text>
+          <RoundButton accessibilityLabel="Edit total carbohydrates" size={40} bg="transparent" edge="end" onPress={() => onBeginEditTotal(totalG)}>
+            <Icon name="edit" size={16} color={colors.ink3} />
+          </RoundButton>
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-          <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 40, color: colors.ink }}>{round(totalG)}g</Text>
+          {editingTotal ? (
+            <TextInput
+              value={totalValue}
+              onChangeText={onTotalValueChange}
+              onSubmitEditing={onCommitEditTotal}
+              onBlur={onCommitEditTotal}
+              keyboardType="decimal-pad"
+              selectTextOnFocus
+              autoFocus
+              accessibilityLabel="Total carbohydrates in grams"
+              style={{
+                width: 120,
+                fontFamily: 'Manrope_800ExtraBold',
+                fontSize: 32,
+                color: colors.ink,
+                borderWidth: 1,
+                borderColor: colors.blue600,
+                borderRadius: radius.chip,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+              }}
+            />
+          ) : (
+            <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 40, color: colors.ink }}>{round(totalG)}g</Text>
+          )}
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
             carbs{' '}
             {analysis.edited
@@ -485,7 +556,7 @@ function ResultContent({
                       style={{
                         width: 64,
                         fontFamily: 'Manrope_600SemiBold',
-                        fontSize: 14,
+                        fontSize: 16,
                         color: colors.ink,
                         borderWidth: 1,
                         borderColor: colors.blue600,
@@ -564,7 +635,7 @@ function Footer({
     content = (
       <View style={{ gap: 10 }}>
         {message ? <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{message}</Text> : null}
-        <PrimaryButton label="Confirm meal" onPress={() => onConfirmResult(state.analysis)} loading={confirming} />
+        <PrimaryButton label="Confirm carbs" onPress={() => onConfirmResult(state.analysis)} loading={confirming} />
         <SecondaryButton label="Cancel" onPress={onCancel} />
       </View>
     );
@@ -572,7 +643,7 @@ function Footer({
     content = (
       <View style={{ gap: 10 }}>
         {message ? <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{message}</Text> : null}
-        <PrimaryButton label="Confirm meal" onPress={onConfirmManual} disabled={!manualGramsValid} loading={confirming} />
+        <PrimaryButton label="Confirm carbs" onPress={onConfirmManual} disabled={!manualGramsValid} loading={confirming} />
         <SecondaryButton label="Cancel" onPress={onCancel} />
       </View>
     );

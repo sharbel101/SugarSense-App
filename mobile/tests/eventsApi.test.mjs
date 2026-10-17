@@ -288,6 +288,8 @@ test('wording lint: no dosing language in the new UI strings', () => {
   const files = [
     'src/components/QuickAdd.tsx',
     'src/components/ForecastExtras.tsx',
+    'src/screens/scan/PostMealScreen.tsx',
+    'src/screens/HomeScreen.tsx',
     'src/screens/InsulinSettingsScreen.tsx',
     'src/services/forecastView.ts',
   ];

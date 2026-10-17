@@ -65,6 +65,8 @@ export interface GlucoseOk {
   rangesAreShadow: boolean;
   modelVersion: string | null;
   generatedAt: string | null;
+  /** Rate of change in mg/dL per minute as supplied by the server; null = not supplied (never 0). */
+  trendMgdlPerMin: number | null;
 }
 
 export interface GlucoseStale {
@@ -206,6 +208,7 @@ export function parseGlucoseResponse(body: unknown): GlucoseResponse | null {
     rangesAreShadow: bool(body.rangesAreShadow) ?? true,
     modelVersion: str(body.modelVersion),
     generatedAt: isIso(body.generatedAt) ? body.generatedAt : null,
+    trendMgdlPerMin: num(body.trendMgdlPerMin),
   };
 }
 

@@ -4,6 +4,7 @@ import type { InsulinView, MealView } from '../api/eventsApi';
 import {
   ABSORPTION_OPTIONS,
   formatEventTime,
+  toHhmm,
   INSULIN_KINDS,
   parseNumber,
   resolveEventTime,
@@ -30,6 +31,7 @@ function carbsBadge(kind: MealView['carbs']['kind']): string {
 /** Server entries (GET /events/recent) merged with the ones still only on this device, newest first. */
 function buildRows(records: EventRecord[], meals: MealView[], insulin: InsulinView[]): Row[] {
   const rows: Row[] = [];
+  const since = Date.now() - 24 * 3_600_000;
   const serverIds = new Set<string>();
   for (const m of meals) {
     serverIds.add(m.id);
@@ -46,7 +48,7 @@ function buildRows(records: EventRecord[], meals: MealView[], insulin: InsulinVi
     if (r.status === 'saved') continue; // server has it but the list has not refreshed yet
     rows.push({ key: `local-${r.event.id}`, kind: r.event.kind, time: r.event.occurredAtUtc, view: null, record: r } as Row);
   }
-  return rows.sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
+  return rows.filter((r) => Date.parse(r.time) >= since).sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
 }
 
 export function EventList({ onDone }: { onDone: () => void }) {
@@ -100,7 +102,7 @@ export function EventList({ onDone }: { onDone: () => void }) {
         </Text>
       ) : null}
       {rows.length === 0 && recent.kind !== 'loading' ? (
-        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>Nothing logged in the last 12 hours.</Text>
+        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>Nothing logged in the last 24 hours.</Text>
       ) : null}
       {removeError ? (
         <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>
@@ -265,13 +267,13 @@ function useEditOutcome() {
   return { message, setMessage, busy, setBusy, handle };
 }
 
-function EditMeal({ view, onClose }: { view: MealView; onClose: () => void }) {
+export function EditMeal({ view, onClose, showTitle = true }: { view: MealView; onClose: () => void; showTitle?: boolean }) {
   const colors = useColors();
   const { editMeal } = useEvents();
   const { message, setMessage, busy, setBusy, handle } = useEditOutcome();
   const [carbs, setCarbs] = useState(view.carbs.grams === null ? '' : String(view.carbs.grams));
-  const [time, setTime] = useState<TimeChoice>({ mode: 'clock', hhmm: formatEventTime(view.eatenAt) });
-  const [hhmm, setHhmm] = useState(formatEventTime(view.eatenAt));
+  const [time, setTime] = useState<TimeChoice>({ mode: 'clock', hhmm: toHhmm(view.eatenAt) });
+  const [hhmm, setHhmm] = useState(toHhmm(view.eatenAt));
   const [timeTouched, setTimeTouched] = useState(false);
   const [approximate, setApproximate] = useState(view.timeApproximateMin > 0);
   const [absorption, setAbsorption] = useState<AbsorptionClass | 'unset'>(view.absorptionClass ?? 'unset');
@@ -323,7 +325,7 @@ function EditMeal({ view, onClose }: { view: MealView; onClose: () => void }) {
 
   return (
     <>
-      <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>Edit meal</Text>
+      {showTitle ? <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>Edit meal</Text> : null}
       {cancelled ? <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.amberDark }}>This meal is cancelled and not in the forecast.</Text> : null}
       {message ? <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{message}</Text> : null}
       <FormField label="Carbohydrates" value={carbs} onChangeText={setCarbs} unit="g" keyboardType="decimal-pad" error={error} />
@@ -351,8 +353,8 @@ function EditInsulin({ view, onClose }: { view: InsulinView; onClose: () => void
   const { editInsulin } = useEvents();
   const { message, setMessage, busy, setBusy, handle } = useEditOutcome();
   const [units, setUnits] = useState(view.unitsTaken === null ? '' : String(view.unitsTaken));
-  const [time, setTime] = useState<TimeChoice>({ mode: 'clock', hhmm: formatEventTime(view.administeredAt) });
-  const [hhmm, setHhmm] = useState(formatEventTime(view.administeredAt));
+  const [time, setTime] = useState<TimeChoice>({ mode: 'clock', hhmm: toHhmm(view.administeredAt) });
+  const [hhmm, setHhmm] = useState(toHhmm(view.administeredAt));
   const [timeTouched, setTimeTouched] = useState(false);
   const [notSure, setNotSure] = useState(view.confirmation === 'uncertain');
   const [error, setError] = useState<string | undefined>();

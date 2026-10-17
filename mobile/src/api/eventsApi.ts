@@ -47,6 +47,8 @@ export type WriteOutcome<V> = {
 export type MealStatus = 'confirmed' | 'cancelled' | 'pending' | string;
 export interface MealView {
   id: string;
+  /** The meal's name when the server stored one; null otherwise. */
+  label: string | null;
   eatenAt: string;
   status: MealStatus;
   carbs: {
@@ -232,6 +234,7 @@ function parseMealView(v: unknown): MealView | null {
   const absorption = v.absorptionClass === 'fast' || v.absorptionClass === 'medium' || v.absorptionClass === 'slow' ? v.absorptionClass : null;
   return {
     id: v.id,
+    label: typeof v.label === 'string' && v.label.trim() !== '' ? v.label.trim() : null,
     eatenAt: v.eatenAt,
     status: v.status,
     carbs: {

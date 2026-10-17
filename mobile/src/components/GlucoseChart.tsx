@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
 import { nearestForecastPoint, type ForecastPoint } from '../services/glucoseChart';
@@ -42,6 +42,181 @@ function toPoints(points: ChartPoint[]) {
   return points.map((p) => `${p.x},${p.y}`).join(' ');
 }
 
+
+type StaticProps = Pick<
+  Props,
+  'viewBoxWidth' | 'viewBoxHeight' | 'actual' | 'predicted' | 'band' | 'nowX' | 'highlightPoint' | 'extension' | 'baselineLine'
+> & { height: number; gridLinesY: number[] };
+
+/**
+ * The lines, band and grid. Memoised: while a finger or mouse scrubs across the chart only the
+ * small overlay re-renders, never these polylines (re-drawing them on every move was the lag).
+ * `pointerEvents="none"` keeps the SVG itself out of hit-testing, so a drag can neither select the
+ * SVG nor report coordinates relative to one of its inner shapes.
+ */
+const StaticLayers = React.memo(function StaticLayers({
+  viewBoxWidth,
+  viewBoxHeight,
+  height,
+  actual,
+  predicted,
+  band,
+  nowX,
+  highlightPoint,
+  gridLinesY,
+  extension,
+  baselineLine,
+}: StaticProps) {
+  const colors = useColors();
+  const lastActual = actual[actual.length - 1];
+  const actualPts = useMemo(() => toPoints(actual), [actual]);
+  const predictedPts = useMemo(() => toPoints(predicted), [predicted]);
+  const bandPts = useMemo(() => (band ? toPoints(band) : ''), [band]);
+  const extensionPts = useMemo(() => (extension ? toPoints(extension) : ''), [extension]);
+  const baselinePts = useMemo(() => (baselineLine ? toPoints(baselineLine) : ''), [baselineLine]);
+  return (
+      <Svg
+        width="100%"
+        height={height}
+        pointerEvents="none"
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+        preserveAspectRatio="none"
+      >
+        {gridLinesY.map((y) => (
+          <Line key={y} x1={0} y1={y} x2={viewBoxWidth} y2={y} stroke={colors.divider} strokeWidth={1} />
+        ))}
+
+        {band && band.length > 0 ? (
+          <Polygon points={bandPts} fill={colors.blue500} opacity={0.16} />
+        ) : null}
+
+        <Polyline
+          points={actualPts}
+          fill="none"
+          stroke={colors.blue700}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
+        {nowX !== undefined ? (
+          <Line
+            x1={nowX}
+            y1={0}
+            x2={nowX}
+            y2={viewBoxHeight}
+            stroke={colors.ink4}
+            strokeWidth={1.5}
+            strokeDasharray="3 4"
+          />
+        ) : null}
+
+        {baselineLine && baselineLine.length > 1 ? (
+          <Polyline
+            points={baselinePts}
+            fill="none"
+            stroke={colors.ink4}
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ) : null}
+
+        {extension && extension.length > 1 ? (
+          <Polyline
+            points={extensionPts}
+            fill="none"
+            stroke={colors.blue500}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="1 11"
+            opacity={0.7}
+          />
+        ) : null}
+
+        {predicted.length > 0 ? (
+          <Polyline
+            points={predictedPts}
+            fill="none"
+            stroke={colors.blue500}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="1 7"
+          />
+        ) : null}
+
+        {lastActual ? <Circle cx={lastActual.x} cy={lastActual.y} r={4.5} fill={colors.blue700} /> : null}
+
+        {highlightPoint ? (
+          <Circle
+            cx={highlightPoint.x}
+            cy={highlightPoint.y}
+            r={5}
+            fill={colors.surface}
+            stroke={colors.blue600}
+            strokeWidth={2.5}
+          />
+        ) : null}
+      </Svg>
+
+  );
+});
+
+const YLabels = React.memo(function YLabels({ yTicks, height }: { yTicks?: { frac: number; label: string }[]; height: number }) {
+  const colors = useColors();
+  if (!yTicks || yTicks.length === 0) return null;
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', left: 2, top: 0, right: 0, height }}>
+      {yTicks.map((t) => (
+        <Text
+          key={t.label}
+          style={{
+            position: 'absolute',
+            top: `${t.frac * 100}%`,
+            marginTop: -15,
+            fontFamily: 'Manrope_500Medium',
+            fontSize: 11,
+            color: colors.ink3,
+          }}
+        >
+          {t.label}
+        </Text>
+      ))}
+    </View>
+  );
+});
+
+const XLabels = React.memo(function XLabels({ xTicks }: { xTicks?: { frac: number; label: string }[] }) {
+  const colors = useColors();
+  if (!xTicks || xTicks.length === 0) return null;
+  return (
+    <View style={{ height: 18, marginTop: 4 }}>
+      {xTicks.map((t) => (
+        <Text
+          key={t.label}
+          style={{
+            position: 'absolute',
+            top: 0,
+            width: 64,
+            fontFamily: 'Manrope_500Medium',
+            fontSize: 11,
+            color: colors.ink3,
+            ...(t.frac < 0.08
+              ? { left: 0, textAlign: 'left' as const }
+              : t.frac > 0.92
+                ? { right: 0, textAlign: 'right' as const }
+                : { left: `${t.frac * 100}%`, marginLeft: -32, textAlign: 'center' as const }),
+          }}
+        >
+          {t.label}
+        </Text>
+      ))}
+    </View>
+  );
+});
+
 /**
  * Renders a glucose trend: a solid "actual" line, a dashed "predicted" median
  * line, and a shaded uncertainty band — reused across Home, Predict, and the
@@ -67,7 +242,6 @@ export function GlucoseChart({
   accessibilityLabel,
 }: Props) {
   const colors = useColors();
-  const lastActual = actual[actual.length - 1];
 
   const [scrub, setScrub] = useState<ForecastPoint | null>(null);
   const [pickedMarker, setPickedMarker] = useState<string | null>(null);
@@ -109,92 +283,25 @@ export function GlucoseChart({
       onResponderMove={(e) => updateScrub(e.nativeEvent.locationX)}
       onResponderRelease={() => setScrub(null)}
       onResponderTerminate={() => setScrub(null)}
-      style={canScrub && Platform.OS === 'web' ? ({ touchAction: 'pan-y', userSelect: 'none' } as object) : undefined}
+      style={
+        Platform.OS === 'web'
+          ? ({ touchAction: canScrub ? 'pan-y' : 'auto', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as object)
+          : undefined
+      }
     >
-      <Svg
-        width="100%"
+      <StaticLayers
+        viewBoxWidth={viewBoxWidth}
+        viewBoxHeight={viewBoxHeight}
         height={height ?? viewBoxHeight}
-        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
-        preserveAspectRatio="none"
-      >
-        {gridLinesY.map((y) => (
-          <Line key={y} x1={0} y1={y} x2={viewBoxWidth} y2={y} stroke={colors.divider} strokeWidth={1} />
-        ))}
-
-        {band && band.length > 0 ? (
-          <Polygon points={toPoints(band)} fill={colors.blue500} opacity={0.16} />
-        ) : null}
-
-        <Polyline
-          points={toPoints(actual)}
-          fill="none"
-          stroke={colors.blue700}
-          strokeWidth={3}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {nowX !== undefined ? (
-          <Line
-            x1={nowX}
-            y1={0}
-            x2={nowX}
-            y2={viewBoxHeight}
-            stroke={colors.ink4}
-            strokeWidth={1.5}
-            strokeDasharray="3 4"
-          />
-        ) : null}
-
-        {baselineLine && baselineLine.length > 1 ? (
-          <Polyline
-            points={toPoints(baselineLine)}
-            fill="none"
-            stroke={colors.ink4}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : null}
-
-        {extension && extension.length > 1 ? (
-          <Polyline
-            points={toPoints(extension)}
-            fill="none"
-            stroke={colors.blue500}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="1 11"
-            opacity={0.7}
-          />
-        ) : null}
-
-        {predicted.length > 0 ? (
-          <Polyline
-            points={toPoints(predicted)}
-            fill="none"
-            stroke={colors.blue500}
-            strokeWidth={3}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="1 7"
-          />
-        ) : null}
-
-        {lastActual ? <Circle cx={lastActual.x} cy={lastActual.y} r={4.5} fill={colors.blue700} /> : null}
-
-        {highlightPoint ? (
-          <Circle
-            cx={highlightPoint.x}
-            cy={highlightPoint.y}
-            r={5}
-            fill={colors.surface}
-            stroke={colors.blue600}
-            strokeWidth={2.5}
-          />
-        ) : null}
-      </Svg>
+        actual={actual}
+        predicted={predicted}
+        band={band}
+        nowX={nowX}
+        highlightPoint={highlightPoint}
+        gridLinesY={gridLinesY}
+        extension={extension}
+        baselineLine={baselineLine}
+      />
 
       {scrub ? (
         <View
@@ -328,50 +435,8 @@ export function GlucoseChart({
         </View>
       ) : null}
 
-      {yTicks && yTicks.length > 0 ? (
-        <View pointerEvents="none" style={{ position: 'absolute', left: 2, top: 0, right: 0, height: height ?? viewBoxHeight }}>
-          {yTicks.map((t) => (
-            <Text
-              key={t.label}
-              style={{
-                position: 'absolute',
-                top: `${t.frac * 100}%`,
-                marginTop: -15,
-                fontFamily: 'Manrope_500Medium',
-                fontSize: 11,
-                color: colors.ink3,
-              }}
-            >
-              {t.label}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-
-      {xTicks && xTicks.length > 0 ? (
-        <View style={{ height: 18, marginTop: 4 }}>
-          {xTicks.map((t) => (
-            <Text
-              key={t.label}
-              style={{
-                position: 'absolute',
-                top: 0,
-                width: 64,
-                fontFamily: 'Manrope_500Medium',
-                fontSize: 11,
-                color: colors.ink3,
-                ...(t.frac < 0.08
-                  ? { left: 0, textAlign: 'left' as const }
-                  : t.frac > 0.92
-                    ? { right: 0, textAlign: 'right' as const }
-                    : { left: `${t.frac * 100}%`, marginLeft: -32, textAlign: 'center' as const }),
-              }}
-            >
-              {t.label}
-            </Text>
-          ))}
-        </View>
-      ) : null}
+      <YLabels yTicks={yTicks} height={height ?? viewBoxHeight} />
+      <XLabels xTicks={xTicks} />
     </View>
   );
 }

@@ -47,6 +47,8 @@
     "test:events": "node --no-warnings --experimental-strip-types --test tests/events.test.mjs",
     "test:eventsapi": "node --no-warnings --experimental-strip-types --test tests/eventsApi.test.mjs",
     "test:forecast": "node --no-warnings --experimental-strip-types --test tests/forecast.test.mjs",
+    "test:estimate": "node --no-warnings --experimental-strip-types --test tests/mealInsulinEstimate.test.mjs",
+    "test:history": "node --no-warnings --experimental-strip-types --test tests/mealHistory.test.mjs",
     "test:pull": "node --no-warnings --experimental-strip-types --test tests/pullToRefresh.test.mjs",
     "test:headers": "node --no-warnings --experimental-strip-types --test tests/requestHeaders.test.mjs",
     "test:update": "node --no-warnings --experimental-strip-types --test tests/webUpdate.test.mjs",

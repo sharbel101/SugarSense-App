@@ -9,6 +9,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { PredictScreen } from '../screens/PredictScreen';
 import { InsulinSettingsScreen } from '../screens/InsulinSettingsScreen';
+import { MealHistoryScreen } from '../screens/MealHistoryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SafetyScreen } from '../screens/SafetyScreen';
 import { useTheme } from '../theme';
@@ -17,7 +18,8 @@ import { RootStackParamList, TabParamList } from './types';
 
 const navRef = createNavigationContainerRef();
 /** Screens where the global "+" is hidden: the scan flow is deliberately immersive, Profile is a modal. */
-const FAB_HIDDEN_ROUTES = new Set(['Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings']);
+// Home has its own Add meal / Log insulin buttons, so the floating + is hidden there.
+const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory']);
 
 const Tab = createBottomTabNavigator<TabParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -87,6 +89,7 @@ export function RootNavigator() {
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
         <RootStack.Screen name="InsulinSettings" component={InsulinSettingsScreen} />
+        <RootStack.Screen name="MealHistory" component={MealHistoryScreen} />
       </RootStack.Navigator>
     </NavigationContainer>
     <QuickAddFab hidden={FAB_HIDDEN_ROUTES.has(leafRoute)} />
