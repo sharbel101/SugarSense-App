@@ -133,7 +133,7 @@ export function ForecastPrompts({ forecast }: { forecast: ForecastOkDisplay }) {
                 <SecondaryButton label="I took none" onPress={() => open({ mode: 'none', meal })} />
               </>
             ) : null}
-            {p.kind === 'dose_without_meal' || p.kind === 'dose_ambiguous' ? (
+            {p.kind === 'dose_ambiguous' ? (
               <SecondaryButton label="Review what you logged" onPress={() => open({ mode: 'list' })} />
             ) : null}
           </View>

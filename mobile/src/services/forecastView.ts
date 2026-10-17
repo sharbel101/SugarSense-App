@@ -46,7 +46,6 @@ export const ON_BOARD_EXPLAINER =
 export type PromptKind =
   | 'set_ratio'
   | 'meal_without_insulin'
-  | 'dose_without_meal'
   | 'dose_ambiguous';
 
 export type ForecastPrompt = {
@@ -76,10 +75,8 @@ export function forecastPrompts(f: ForecastOkDisplay): ForecastPrompt[] {
       eventId: meal?.id ?? null,
     });
   }
-  const noMeal = f.mealAware.events.find((e) => e.reason === 'dose_without_recorded_meal');
-  if (noMeal) {
-    out.push({ kind: 'dose_without_meal', text: 'An insulin dose has no meal recorded, so the range is wider.', eventId: noMeal.id });
-  }
+  // A dose with no meal recorded is not prompted: it is a normal case (a correction, a snack) and the
+  // server already widens the range for it.
   const ambiguous = f.mealAware.events.find((e) => e.reason === 'insulin_link_ambiguous');
   if (ambiguous) {
     out.push({ kind: 'dose_ambiguous', text: 'A dose could belong to two meals; tell us which.', eventId: ambiguous.id });
