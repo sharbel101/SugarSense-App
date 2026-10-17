@@ -15,7 +15,9 @@ import { GlucoseService } from '../glucose/glucose.service.js';
 import { BaselineErrorService } from './baseline-error.service.js';
 import { EventsService, type InsulinRow, type MealRow } from './events.service.js';
 import {
+  ALL_LOGGED_COUNTED_DESCRIPTION,
   FORECAST_DISCLAIMER,
+  type AllLoggedCountedDisplay,
   type EventRoleDisplay,
   type ForecastDisplay,
   type ForecastEventDisplay,
@@ -30,6 +32,8 @@ import { UsersService } from './users.service.js';
 /** Insulin tail (longest allowed duration) plus margin: events older than this cannot still be acting. */
 const LOOKBACK_SEC = 480 * 60;
 const FUTURE_SLACK_SEC = 5 * 60;
+/** The what-if view is only shown when it moves the line by at least this much (mg/dL) somewhere. */
+const ALL_COUNTED_MIN_DIFF_MGDL = 1;
 
 export interface RunOptions {
   horizonMin?: number;
@@ -190,6 +194,7 @@ export class ForecastService {
           excludedMealIds: excludeMealIds.filter((id) => mealRows.some((m) => m.mealId === id)),
           availability: availabilityView,
           events: eventDisplay,
+          allLoggedCounted: null,
         },
         notes: [...new Set(notes)],
         disclaimer: FORECAST_DISCLAIMER,
@@ -224,6 +229,9 @@ export class ForecastService {
 
     notes.push(...buildNotes({ layer, allDispositions, atAnchor, points, counterfactual, built, eventsLoaded: eventsLoaded || !this.db.available, baselineSigmaExtrapolated: true }));
 
+    const allLoggedCounted = counterfactual ? null : buildAllLoggedCounted(inputs, points, allDispositions, anchorSec);
+    if (allLoggedCounted) notes.push(allCountedNote(allLoggedCounted, points));
+
     const changed = points.some((p) => Math.abs(p.adjusted - (p.baseline ?? p.adjusted)) >= 0.05);
 
     return {
@@ -240,6 +248,7 @@ export class ForecastService {
         excludedMealIds: excludeMealIds.filter((id) => mealRows.some((m) => m.mealId === id)),
         availability: availabilityView,
         events: eventDisplay,
+        allLoggedCounted,
       },
       models: {
         baseline: g.modelVersion,
@@ -498,6 +507,50 @@ function buildEventLinks(
     }
   }
   return out;
+}
+
+/**
+ * The what-if line: the same engine with every logged dose and meal counted in full. Pure; nothing is stored. Null when no entry is
+ * left out of the main line, or when counting them would hardly move it (for example a dose that finished acting hours ago).
+ */
+export function buildAllLoggedCounted(
+  inputs: RunInputs,
+  main: readonly ForecastPoint[],
+  dispositions: readonly EventDisposition[],
+  anchorSec: number,
+): AllLoggedCountedDisplay | null {
+  const left = dispositions.filter((d) => d.role === 'scenario_only');
+  if (left.length === 0) return null;
+  const { points } = computeRun(inputs, { applyAll: true });
+  if (points.length === 0) return null;
+  const gap = Math.max(...points.map((p) => Math.abs(p.adjusted - (main.find((m) => m.minutes === p.minutes)?.adjusted ?? p.adjusted))));
+  if (gap < ALL_COUNTED_MIN_DIFF_MGDL) return null;
+  const lowest = points.reduce((a, p) => (p.adjusted < a.adjusted ? p : a), points[0] as ForecastPoint);
+  const highest = points.reduce((a, p) => (p.adjusted > a.adjusted ? p : a), points[0] as ForecastPoint);
+  return {
+    description: ALL_LOGGED_COUNTED_DESCRIPTION,
+    points: points.map((p) => ({ minutes: p.minutes, time: toIso(anchorSec + p.minutes * 60), adjusted: p.adjusted, low: p.low, high: p.high })),
+    summary: {
+      lowestMgdl: lowest.adjusted,
+      lowestAtMin: lowest.minutes,
+      highestMgdl: highest.adjusted,
+      highestAtMin: highest.minutes,
+      lowestRangeEdgeMgdl: Math.min(...points.map((p) => p.low)),
+    },
+    countedEntries: left.map((d) => ({ id: d.id, type: d.eventType, reason: d.reason })),
+  };
+}
+
+/** One plain sentence about the direction in which the what-if line differs most from the main line. */
+function allCountedNote(w: AllLoggedCountedDisplay, main: readonly ForecastPoint[]): string {
+  const mainAt = (minutes: number): number => main.find((m) => m.minutes === minutes)?.adjusted ?? 0;
+  const below = mainAt(w.summary.lowestAtMin) - w.summary.lowestMgdl;
+  const above = w.summary.highestMgdl - mainAt(w.summary.highestAtMin);
+  const head = 'What-if, not a prediction: if every dose and meal you logged counted in full and nothing else were eaten or taken, ';
+  if (below >= above) {
+    return head + 'the line would fall to about ' + Math.round(w.summary.lowestMgdl) + ' mg/dL around +' + w.summary.lowestAtMin + ' min (range down to ' + Math.round(w.summary.lowestRangeEdgeMgdl) + ').';
+  }
+  return head + 'the line would rise to about ' + Math.round(w.summary.highestMgdl) + ' mg/dL around +' + w.summary.highestAtMin + ' min.';
 }
 
 function buildNotes(a: {

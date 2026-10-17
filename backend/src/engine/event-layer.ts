@@ -41,6 +41,11 @@ export interface LayerInput {
   excludeMealIds: ReadonlySet<string>;
   /** Whether the insulin history behind the window is known; decides IOB: logged / zero / unknown. */
   insulinHistory: 'logged' | 'confirmed_none' | 'none_recorded';
+  /**
+   * What-if view only: count EVERY logged dose and meal in full, including doses without a recorded meal and meals
+   * without an insulin record (which the normal line only uses to stretch the range). Never saved, never learned from.
+   */
+  applyAll?: boolean;
 }
 
 const zeros = (n: number): number[] => Array.from({ length: n }, () => 0);
@@ -88,7 +93,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     }
     const link = linkByMeal.get(meal.id);
     const status = link?.status ?? 'none_recorded';
-    const knownCoverage = status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none';
+    const knownCoverage = input.applyAll === true || status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none';
 
     const csf = (meal.isfMgdlPerU as number) / (meal.icrGPerU as number);
     const incAt = (ageMin: number, j: number): number => mealIncrement(meal, csf, ageMin, minutes[j] as number, params);
@@ -169,6 +174,11 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     } else {
       role = 'scenario_only';
       reason = 'dose_without_recorded_meal';
+    }
+
+    if (input.applyAll === true && role === 'scenario_only') {
+      role = 'applied';
+      reason = 'what_if_counted';
     }
 
     const tp = dose.ultraRapid ? params.tpUltraMin : params.tpRapidMin;

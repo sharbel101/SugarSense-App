@@ -35,6 +35,31 @@ export interface ForecastEventDisplay {
   reason: string;
 }
 
+/**
+ * "Where would I be if everything I logged counted?" A what-if line, not a prediction: every logged dose and meal is counted in
+ * full (including a dose with no meal recorded, e.g. a correction logged "with a meal", and a meal with no insulin record) and
+ * nothing else is eaten or taken. It is only present when it differs from the main line, which leaves such entries out of its
+ * central line (it only widens the range for them). Not saved and never learned from.
+ */
+export interface AllLoggedCountedDisplay {
+  description: string;
+  /** Same 5-minute grid as the main forecast; `low` / `high` bound its 80% range. */
+  points: { minutes: number; time: string; adjusted: number; low: number; high: number }[];
+  summary: {
+    lowestMgdl: number;
+    lowestAtMin: number;
+    highestMgdl: number;
+    highestAtMin: number;
+    /** Lowest value the what-if 80% range reaches at any time. */
+    lowestRangeEdgeMgdl: number;
+  };
+  /** The entries the main line leaves out of its central line but this view counts, with the reason they were left out. */
+  countedEntries: { id: string; type: 'meal' | 'insulin'; reason: string }[];
+}
+
+export const ALL_LOGGED_COUNTED_DESCRIPTION =
+  'What-if, not a prediction: every dose and meal you logged counted in full, and nothing else eaten or taken.';
+
 export interface MealAwareDisplay {
   /** True when logged events moved the central line away from the glucose-only forecast. */
   changedForecast: boolean;
@@ -54,6 +79,8 @@ export interface MealAwareDisplay {
     therapySettings: 'available' | 'unavailable';
   };
   events: ForecastEventDisplay[];
+  /** null when every logged entry already counts in the main line (or the what-if view would look the same). */
+  allLoggedCounted: AllLoggedCountedDisplay | null;
 }
 
 export interface ForecastOkDisplay {

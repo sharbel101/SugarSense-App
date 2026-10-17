@@ -112,6 +112,24 @@ Meals have a short `label` (typed, or derived from the items of a photo meal, e.
 Responses expose display fields only: no ICR/ISF values, scales, snapshots, raw Gemini JSON, internal ids other than
 event ids, or any database detail (tests assert this).
 
+## What-if: "where would I be if everything I logged counted?" (`mealAware.allLoggedCounted`)
+
+The main line deliberately does **not** move for a dose with no meal recorded (it may cover a meal not logged yet) or for a meal with no
+insulin record (the insulin may not be logged yet); it only stretches the range. That hides the effect of, for example, a correction that
+was logged "with a meal" but without a meal. `allLoggedCounted` answers it separately, without changing the main line:
+
+* The same engine, with every logged delivered dose and every logged meal counted in full (`applyAll`, reason `what_if_counted`) and
+  nothing else eaten or taken. Still left out, because nothing may be invented: planned doses, basal/long-acting insulin, meals without
+  carbohydrates or without ratios, meals the person excluded, withdrawn entries.
+* Present only when at least one entry is left out of the main line **and** counting it moves the line by at least 1 mg/dL somewhere (a dose
+  that finished acting hours ago does not trigger it). Otherwise `null`. Also `null` in what-if (counterfactual) views and when no glucose
+  forecast exists.
+* Shape: `description` (fixed text, "not a prediction"), `points[]` (`minutes`, `time`, `adjusted`, `low`, `high`, same 5-minute grid, the
+  80% range is included so it never shows false precision), `summary` (`lowestMgdl/At`, `highestMgdl/At`, `lowestRangeEdgeMgdl`) and
+  `countedEntries[]` (the entries it counts that the main line leaves out, each with the reason). A plain sentence is also added to `notes`.
+* It is **not saved** and **never learned from**; the stored run is the main line. It is an observation about the entries the person
+  logged, not a dose suggestion, and no forecast value feeds any dose calculation.
+
 ## Withdrawn entries (the app's trash button)
 
 `PATCH /events/meals/:id` and `PATCH /events/insulin/:id` with `{ "status": "cancelled", "expectedRevision": n }` withdraw an entry. Nothing is deleted:

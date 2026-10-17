@@ -163,6 +163,20 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     expect(recent.body.insulin[0]).toMatchObject({ id: keepD.body.insulin.id, status: 'active' });
   });
 
+  it('GET /forecast: the what-if block appears only when a logged entry is left out of the main line', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const none = await http.get('/forecast').expect(200);
+    expect(none.body.mealAware.allLoggedCounted).toBeNull();
+    await http.post('/events/insulin').send({ clientId: 'wi-http-dose-001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual' }).expect(201);
+    const f = await http.get('/forecast').expect(200);
+    const w = f.body.mealAware.allLoggedCounted;
+    expect(w.points).toHaveLength(36);
+    expect(w.summary.lowestMgdl).toBeLessThan(f.body.points.find((p: { minutes: number }) => p.minutes === 120).adjusted);
+    expect(w.countedEntries).toHaveLength(1);
+    expect(JSON.stringify(w)).not.toMatch(/icr|isf|mCsf|snapshot/i);
+  });
+
   it('time zone: saved with the settings, validated, returned, and used to read the time-of-day ratios', async () => {
     const http = request(app.getHttpServer());
     await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], timezone: 'Mars/Olympus' }).expect(400);

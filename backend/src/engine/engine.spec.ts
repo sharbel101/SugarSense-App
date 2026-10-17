@@ -249,6 +249,28 @@ describe('event layer', () => {
     expect(r.iobU).toBeGreaterThan(0); // it was still taken: it stays in the insulin-on-board count
   });
 
+  it('what-if (applyAll) counts a dose with no recorded meal and a meal with no insulin record in full', () => {
+    const lonely = layer({ insulin: [dose()], insulinHistory: 'logged' });
+    expect(lonely.series.insulinApplied.every((v) => v === 0)).toBe(true); // the normal line leaves it out
+    const whatIf = layer({ insulin: [dose()], insulinHistory: 'logged', applyAll: true });
+    const asCorrection = layer({ insulin: [dose({ kind: 'correction' })], insulinHistory: 'logged' });
+    expect(whatIf.series.insulinApplied).toEqual(asCorrection.series.insulinApplied);
+    expect(whatIf.dispositions[0]).toMatchObject({ role: 'applied', reason: 'what_if_counted' });
+
+    const noRecord: MealLink[] = [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }];
+    expect(layer({ meals: [meal()], links: noRecord }).series.mealApplied.every((v) => v === 0)).toBe(true);
+    const mealWhatIf = layer({ meals: [meal()], links: noRecord, applyAll: true });
+    const confirmedNone = layer({ meals: [meal()], links: [{ mealId: 'm1', status: 'confirmed_none', insulinIds: [], unitsTotal: 0 }], insulinHistory: 'confirmed_none' });
+    expect(mealWhatIf.series.mealApplied).toEqual(confirmedNone.series.mealApplied);
+  });
+
+  it('what-if still leaves out what has no ratio, was excluded, or has no correction factor - nothing is invented', () => {
+    const noRecord: MealLink[] = [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }];
+    expect(layer({ meals: [meal({ icrGPerU: null })], links: noRecord, applyAll: true }).series.mealApplied.every((v) => v === 0)).toBe(true);
+    expect(layer({ meals: [meal()], links: noRecord, excludeMealIds: new Set(['m1']), applyAll: true }).series.mealApplied.every((v) => v === 0)).toBe(true);
+    expect(layer({ insulin: [dose({ isfMgdlPerU: null })], applyAll: true }).series.insulinApplied.every((v) => v === 0)).toBe(true);
+  });
+
   it('missing ICR or ISF: the meal is ignored with a stated reason, nothing is invented', () => {
     const r = layer({
       meals: [meal({ icrGPerU: null })],

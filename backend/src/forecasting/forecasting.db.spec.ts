@@ -514,6 +514,85 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
     });
   });
 
+  describe('what-if: everything you logged counted in full', () => {
+    const rigWith = (glucose = 150): Rig => makeRig({ glucose, baseline: () => glucose });
+
+    it('a correction logged without a meal leaves the main line alone, but the what-if view shows where it leads', async () => {
+      const rig = rigWith(150);
+      await setTestTherapy(rig); // ICR 10, ISF 50 (test values)
+      const dose = await rig.api.addInsulin({ clientId: 'wi-dose-0000001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      const f = ok(dose.forecast);
+      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline); // main line unchanged
+      const w = f.mealAware.allLoggedCounted!;
+      expect(w).not.toBeNull();
+      expect(w.description).toMatch(/not a prediction/);
+      expect(w.points).toHaveLength(36);
+      expect(w.points[0]).toEqual({ minutes: 5, time: expect.any(String), adjusted: expect.any(Number), low: expect.any(Number), high: expect.any(Number) });
+      expect(w.countedEntries).toEqual([{ id: dose.insulin!.id, type: 'insulin', reason: 'dose_without_recorded_meal' }]);
+      // 2 U x ISF 50 = 100 mg/dL still to come, most of it within 2-3 hours
+      const w120 = w.points.find((p) => p.minutes === 120)!;
+      expect(w120.adjusted).toBeLessThan(150 - 40);
+      expect(w120.low).toBeLessThanOrEqual(w120.adjusted);
+      expect(w120.high).toBeGreaterThanOrEqual(w120.adjusted);
+      // the summary agrees with the points
+      expect(w.summary.lowestMgdl).toBe(Math.min(...w.points.map((p) => p.adjusted)));
+      expect(w.points.find((p) => p.minutes === w.summary.lowestAtMin)!.adjusted).toBe(w.summary.lowestMgdl);
+      expect(w.summary.highestMgdl).toBe(Math.max(...w.points.map((p) => p.adjusted)));
+      expect(w.summary.lowestRangeEdgeMgdl).toBe(Math.min(...w.points.map((p) => p.low)));
+      expect(w.summary.lowestRangeEdgeMgdl).toBeLessThanOrEqual(w.summary.lowestMgdl);
+      expect(f.notes.join(' ')).toMatch(/What-if, not a prediction: .*would fall to about \d+ mg\/dL around \+\d+ min/);
+      // nothing extra is stored for the what-if: one run, stored as the main line (no entry applied), never as a what-if configuration
+      expect(f.saved).toBe(true);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM predictions WHERE user_id = $1 AND feature_config <> 'glucose_only'", [rig.userId])).toBe(0);
+    });
+
+    it('the same dose logged as a correction is already in the main line, so there is nothing separate to show', async () => {
+      const rig = rigWith(150);
+      await setTestTherapy(rig);
+      const c = await rig.api.addInsulin({ clientId: 'wi-corr-0000001', administeredAt: iso(nowSec() - 600), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      const f = ok(c.forecast);
+      expect(f.mealAware.allLoggedCounted).toBeNull();
+      expect(at(f, 120).adjusted).toBeLessThan(150 - 40); // the main line itself moves
+    });
+
+    it('is absent when nothing is left out of the main line: nothing logged, a meal with its dose, a withdrawn dose, a dose that finished acting', async () => {
+      expect(ok(await rigWith().forecast.run()).mealAware.allLoggedCounted).toBeNull();
+
+      const a = rigWith();
+      await setTestTherapy(a);
+      const m = await a.api.addMeal({ clientId: 'wi-null-meal-001', eatenAt: iso(nowSec() - 300), carbsG: 60 });
+      const d = await a.api.addInsulin({ clientId: 'wi-null-dose-001', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual', mealId: m.meal!.id });
+      expect(ok(d.forecast).mealAware.allLoggedCounted).toBeNull();
+
+      const b = rigWith();
+      await setTestTherapy(b);
+      const lonely = await b.api.addInsulin({ clientId: 'wi-null-dose-002', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      expect(ok(lonely.forecast).mealAware.allLoggedCounted).not.toBeNull();
+      expect(ok((await b.api.editInsulin(lonely.insulin!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).toBeNull();
+
+      const c = rigWith();
+      await setTestTherapy(c);
+      const old = await c.api.addInsulin({ clientId: 'wi-null-dose-003', administeredAt: iso(nowSec() - 7 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual' });
+      expect(ok(old.forecast).mealAware.allLoggedCounted).toBeNull(); // 7 h ago: nothing left to act, so nothing would change
+    });
+
+    it('a meal with no insulin record: main line unchanged, the what-if view shows the uncovered rise; a what-if with meals left out shows none', async () => {
+      const rig = rigWith(130);
+      await setTestTherapy(rig);
+      const m = await rig.api.addMeal({ clientId: 'wi-meal-0000001', eatenAt: iso(nowSec() - 300), carbsG: 50 });
+      const f = ok(m.forecast);
+      expect(f.mealAware.changedForecast).toBe(false);
+      const w = f.mealAware.allLoggedCounted!;
+      expect(w.summary.highestMgdl).toBeGreaterThan(200); // 50 g x CSF 5 mg/dL per g, mostly still to come
+      expect(w.countedEntries).toEqual([{ id: m.meal!.id, type: 'meal', reason: 'insulin_not_recorded' }]);
+      expect(f.notes.join(' ')).toMatch(/would rise to about/);
+      const cf = ok(await rig.forecast.run({ excludeMealIds: [m.meal!.id], persist: false }));
+      expect(cf.mealAware.counterfactual).toBe(true);
+      expect(cf.mealAware.allLoggedCounted).toBeNull();
+    });
+  });
+
   describe('withdrawing (cancelling) entries', () => {
     const latestRunLinks = async (rig: Rig): Promise<{ meal_id: string | null; insulin_id: string | null; role: string; role_reason: string | null }[]> =>
       (
