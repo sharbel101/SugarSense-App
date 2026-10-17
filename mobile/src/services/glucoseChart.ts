@@ -153,3 +153,76 @@ export function nearestForecastPoint(points: ForecastPoint[], x: number): Foreca
   }
   return best;
 }
+
+export type HistoryChartModel = {
+  viewBoxWidth: number;
+  viewBoxHeight: number;
+  /** Measured readings up to and including the latest, left to right. */
+  actual: ChartPoint[];
+  nowX: number;
+  gridLinesY: number[];
+  xTicks: { frac: number; label: string }[];
+  yTicks: { frac: number; label: string }[];
+  /** One scrub point per reading; `minutesAhead` is NEGATIVE (minutes ago), 0 for the latest. */
+  scrubPoints: ForecastPoint[];
+};
+
+/**
+ * History-only chart for Home: the last hour of readings spread over the FULL width (the forecast
+ * chart reserves the right part for the future, which left Home's chart squeezed into a third of the
+ * card). Pure; nothing is invented - only the readings the server supplied.
+ */
+/** Room left at both ends so the latest-reading dot is never cut off by the card edge. */
+export const HISTORY_PAD_X = 10;
+
+export function buildHistoryChart(data: GlucoseOk): HistoryChartModel {
+  const W = CHART_VIEWBOX_WIDTH;
+  const H = CHART_VIEWBOX_HEIGHT;
+  const nowT = Date.parse(data.measuredAt);
+  const hist = data.history
+    .map((p) => ({ t: Date.parse(p.time), v: p.value }))
+    .filter((p) => p.t < nowT)
+    .sort((a, b) => a.t - b.t);
+  const all = [...hist, { t: nowT, v: data.glucoseMgdl }];
+  const t0 = all[0].t;
+  const span = Math.max(nowT - t0, MIN);
+
+  const values = all.map((p) => p.v);
+  let lo = Math.floor((Math.min(...values) - 10) / 10) * 10;
+  let hi = Math.ceil((Math.max(...values) + 10) / 10) * 10;
+  if (hi - lo < MIN_Y_SPAN_MGDL) {
+    const mid = (hi + lo) / 2;
+    lo = Math.floor((mid - MIN_Y_SPAN_MGDL / 2) / 10) * 10;
+    hi = lo + MIN_Y_SPAN_MGDL;
+  }
+  lo = Math.max(0, lo);
+
+  const xOf = (t: number) => HISTORY_PAD_X + ((t - t0) / span) * (W - 2 * HISTORY_PAD_X);
+  const yOf = (v: number) => PAD_Y + ((hi - v) / (hi - lo)) * (H - 2 * PAD_Y);
+
+  const gridValues: number[] = [];
+  for (let v = Math.ceil(lo / 50) * 50; v <= hi; v += 50) {
+    if (v > lo && v < hi) gridValues.push(v);
+  }
+  const first = Math.round((nowT - t0) / MIN);
+  const xTicks: { frac: number; label: string }[] = [];
+  if (first >= 5) xTicks.push({ frac: 0, label: `-${first}m` });
+  xTicks.push({ frac: 1, label: 'Latest' });
+
+  return {
+    viewBoxWidth: W,
+    viewBoxHeight: H,
+    actual: all.map((p) => ({ x: xOf(p.t), y: yOf(p.v) })),
+    nowX: W - HISTORY_PAD_X,
+    gridLinesY: gridValues.map(yOf),
+    xTicks,
+    yTicks: gridValues.map((v) => ({ frac: yOf(v) / H, label: String(v) })),
+    scrubPoints: all.map((p) => ({
+      x: xOf(p.t),
+      y: yOf(p.v),
+      timeMs: p.t,
+      value: p.v,
+      minutesAhead: 0 - Math.round((nowT - p.t) / MIN),
+    })),
+  };
+}

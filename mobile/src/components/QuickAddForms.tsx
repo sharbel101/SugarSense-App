@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { goToInsulinSettings } from '../navigation/navigationRef';
 import { apiContext } from '../api/apiContext';
 import { getTherapySettings } from '../api/therapyApi';
 import {
@@ -20,13 +21,14 @@ import {
   validateMeal,
   type AbsorptionClass,
 } from '../services/events';
-import type { EventRecord } from '../services/eventQueue';
 import { useEvents } from '../services/EventsProvider';
 import { mealChoices, type MealRef } from '../services/mealRefs';
-import { PENDING_MESSAGE, savedMessage } from '../services/forecastView';
 import { radius, touch, useColors } from '../theme';
 import { PrimaryButton, SecondaryButton } from './Buttons';
 import { CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
+import { ResultBanner, useRecord } from './EventResult';
+import { Icon } from './Icon';
+import { DoseConfirmCard } from './DoseConfirmCard';
 
 const NOW: TimeChoice = { mode: 'minutesAgo', minutes: 0 };
 
@@ -68,84 +70,38 @@ function Helper({ children }: { children: React.ReactNode }) {
   return <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>{children}</Text>;
 }
 
-/**
- * What happened to the entry the person just submitted, read from the queue record: saved (and
- * whether the forecast was refreshed), still pending (not confirmed - never called saved), a
- * duplicate warning, or a server rejection. The form below stays filled in.
- */
-function ResultBanner({
-  record,
-  onSaveAnyway,
-  onDiscardDuplicate,
-  onEditAgain,
-  onDone,
-  onSendNow,
-}: {
-  record: EventRecord;
-  onSaveAnyway: () => void;
-  onDiscardDuplicate: () => void;
-  onEditAgain: () => void;
-  onDone: () => void;
-  onSendNow: () => void;
-}) {
-  const colors = useColors();
-  if (record.status === 'saved') {
-    return (
-      <>
-        <View accessibilityLiveRegion="polite" style={{ backgroundColor: colors.green100, borderRadius: radius.hero, padding: 18, gap: 6 }}>
-          <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 17, color: colors.greenDark }}>{savedMessage(record.forecastReturned)}</Text>
-        </View>
-        <PrimaryButton label="Done" onPress={onDone} />
-      </>
-    );
-  }
-  if (record.awaitingDuplicateDecision) {
-    return (
-      <>
-        <View accessibilityLiveRegion="polite" style={{ backgroundColor: colors.amber100, borderRadius: radius.hero, padding: 18, gap: 6 }}>
-          <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: colors.amberDark }}>Looks like an entry you already made</Text>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.amberDark, lineHeight: 20 }}>
-            {record.reason ?? 'An entry with the same time and amount already exists.'}
-          </Text>
-        </View>
-        <PrimaryButton label="Save anyway" onPress={onSaveAnyway} />
-        <SecondaryButton label="Don't save" onPress={onDiscardDuplicate} />
-      </>
-    );
-  }
-  if (record.status === 'failed') {
-    return (
-      <>
-        <View accessibilityLiveRegion="polite" style={{ backgroundColor: colors.red100, borderRadius: radius.hero, padding: 18, gap: 6 }}>
-          <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: colors.red600 }}>The server could not accept this entry</Text>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.red600, lineHeight: 20 }}>{record.reason}</Text>
-        </View>
-        <PrimaryButton label="Edit and try again" onPress={onEditAgain} />
-      </>
-    );
-  }
-  return (
-    <>
-      <View accessibilityLiveRegion="polite" style={{ backgroundColor: colors.amber100, borderRadius: radius.hero, padding: 18, gap: 6 }}>
-        <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: colors.amberDark }}>{PENDING_MESSAGE}</Text>
-        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.amberDark, lineHeight: 20 }}>
-          Not sent to the server yet - the forecast does not include it. It is kept on this device and sent when the connection is back.
-        </Text>
-      </View>
-      <SecondaryButton label="Send now" onPress={onSendNow} />
-      <PrimaryButton label="Done" onPress={onDone} />
-    </>
-  );
-}
 
-function useRecord(id: string | null): EventRecord | null {
-  const { records } = useEvents();
-  return useMemo(() => (id ? records.find((r) => r.event.id === id) ?? null : null), [records, id]);
+/** A small "use the camera instead" shortcut at the top of the carbs form. */
+function PhotoWidget({ onPress }: { onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Take a photo of the meal instead"
+      style={({ pressed }) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          minHeight: 56,
+          paddingHorizontal: 14,
+          borderRadius: radius.row,
+          backgroundColor: colors.blue100,
+        },
+        pressed ? { opacity: 0.85 } : null,
+      ]}
+    >
+      <Icon name="camera" size={22} color={colors.blue600} />
+      <Text style={{ flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.blue600 }}>Take a photo of the meal instead</Text>
+      <Icon name="chevronRight" size={16} color={colors.blue600} />
+    </Pressable>
+  );
 }
 
 // -------------------------------------------------------------------------------------- meal form
 
-export function MealForm({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
+export function MealForm({ onDone, onBack, onPhoto }: { onDone: () => void; onBack: () => void; onPhoto: () => void }) {
   const colors = useColors();
   const { addEvent, discard, saveAnyway, sendNow } = useEvents();
   const idRef = useRef<string | null>(null);
@@ -195,10 +151,25 @@ export function MealForm({ onDone, onBack }: { onDone: () => void; onBack: () =>
           onEditAgain={editAgain}
           onDone={onDone}
           onSendNow={sendNow}
-        />
+        >
+          {record.event.kind === 'meal' ? (
+            <DoseConfirmCard
+              carbsG={record.event.carbsG}
+              mealTimeIso={record.event.occurredAtUtc}
+              mealKey={record.serverId ?? record.event.id}
+              onDone={onDone}
+              hideDone
+              onOpenSettings={() => {
+                onDone();
+                goToInsulinSettings();
+              }}
+            />
+          ) : null}
+        </ResultBanner>
       ) : null}
       {!record ? (
         <>
+          <PhotoWidget onPress={onPhoto} />
           <FormField label="Carbohydrates" required value={carbs} onChangeText={setCarbs} unit="g" keyboardType="decimal-pad" placeholder="e.g. 45" error={errors.carbs} />
           <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
           <PrimaryButton label="Save carbs" onPress={submit} />

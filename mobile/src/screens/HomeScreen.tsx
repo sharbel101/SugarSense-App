@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
 import { GlucoseChart } from '../components/GlucoseChart';
+import { TrendArrow } from '../components/TrendArrow';
 import { GlucoseStatus } from '../components/GlucoseStatus';
 import { Icon, IconName } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
@@ -11,7 +12,7 @@ import { useQuickAdd, useTabScreenBottomPadding } from '../components/QuickAdd';
 import { TabScreenProps } from '../navigation/types';
 import { useEvents } from '../services/EventsProvider';
 import { formatEventTime } from '../services/events';
-import { buildGlucoseChart } from '../services/glucoseChart';
+import { buildHistoryChart } from '../services/glucoseChart';
 import { summariseRisk } from '../services/glucoseRisk';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
@@ -41,7 +42,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   }, [refreshRecent]);
 
   const okData = view.kind === 'ok' ? view.data : null;
-  const chart = useMemo(() => (okData ? buildGlucoseChart(okData) : null), [okData]);
+  const chart = useMemo(() => (okData ? buildHistoryChart(okData) : null), [okData]);
   const risk = useMemo(() => (okData ? summariseRisk(okData) : null), [okData]);
   const trend = okData ? trendDisplay(okData.trendMgdlPerMin) : null;
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
@@ -110,13 +111,10 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                   {Math.round(okData.glucoseMgdl)}
                 </Text>
                 <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.ink2, marginBottom: 9 }}>mg/dL</Text>
-                {trend ? (
-                  <Text
-                    accessibilityLabel={trend.text}
-                    style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 34, color: colors.ink, marginBottom: 2, marginLeft: 4 }}
-                  >
-                    {trend.arrow}
-                  </Text>
+                {trend && okData.trendMgdlPerMin !== null ? (
+                  <View accessible accessibilityLabel={trend.text} style={{ marginBottom: 6, marginLeft: 4 }}>
+                    <TrendArrow ratePerMin={okData.trendMgdlPerMin} />
+                  </View>
                 ) : null}
               </View>
               {trend ? (
@@ -138,11 +136,14 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                   predicted={[]}
                   nowX={chart.nowX}
                   gridLinesY={chart.gridLinesY}
-                  xTicks={chart.xTicks.filter((t) => !t.label.startsWith('+'))}
+                  xTicks={chart.xTicks}
                   yTicks={chart.yTicks}
-                  height={96}
-                  accessibilityLabel={`Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre.`}
+                  height={150}
+                  forecastPoints={chart.scrubPoints}
+                  scrubKind="history"
+                  accessibilityLabel={`Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre. Press and drag to read earlier values.`}
                 />
+                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, marginTop: 4 }}>Press and drag on the graph to see earlier readings.</Text>
               </View>
             </>
           ) : view.kind === 'ok' ? null : (
@@ -165,12 +166,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
 
         {/* 5 (moved up for reach). Quick actions */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <ActionButton
-            label="Add meal"
-            icon="camera"
-            primary
-            onPress={() => navigation.navigate('Scan', { screen: 'Camera' })}
-          />
+          <ActionButton label="Add meal" icon="fork" primary onPress={() => openQuickAdd({ mode: 'meal' })} />
           <ActionButton label="Log insulin" icon="droplet" onPress={() => openQuickAdd({ mode: 'insulin' })} />
         </View>
 

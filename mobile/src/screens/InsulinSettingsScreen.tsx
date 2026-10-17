@@ -1,7 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, Text, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiContext } from '../api/apiContext';
 import {
   getTherapyHistory,
@@ -17,6 +17,8 @@ import { BackButton, PrimaryButton, SecondaryButton } from '../components/Button
 import { Card } from '../components/Card';
 import { ChoiceChips, FormField } from '../components/FormField';
 import { RootStackParamList } from '../navigation/types';
+import { parseTargetGlucose, useTargetGlucose } from '../services/targetGlucose';
+import { useKeyboardInset } from '../services/useKeyboardInset';
 import { radius, spacing, useColors } from '../theme';
 
 const SOURCES: { value: TherapySource; label: string }[] = [
@@ -36,6 +38,9 @@ const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 
  */
 export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'InsulinSettings'>) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { bottomInset } = useKeyboardInset();
+  const keyboardPad = Math.max(0, bottomInset - insets.bottom);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [current, setCurrent] = useState<TherapySettingsView | null>(null);
@@ -48,6 +53,23 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
+  const savedTarget = useTargetGlucose();
+  const [targetText, setTargetText] = useState<string | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetMessage, setTargetMessage] = useState<string | null>(null);
+  const targetShown = targetText ?? (savedTarget.target === null ? '' : String(savedTarget.target));
+  const saveTarget = async () => {
+    const parsed = parseTargetGlucose(targetShown);
+    if (!parsed.ok) {
+      setTargetError(parsed.error);
+      setTargetMessage(null);
+      return;
+    }
+    setTargetError(null);
+    await savedTarget.save(parsed.value);
+    setTargetText(null);
+    setTargetMessage(parsed.value === null ? 'Target glucose cleared.' : `Target glucose saved: ${parsed.value} mg/dL.`);
+  };
   const extraRowErrors = Boolean(errors && (errors.note || errors.rows.slice(1).some((r) => r.startTime || r.icr || r.isf)));
 
   const fetchAll = () => Promise.all([getTherapySettings(apiContext), getTherapyHistory(apiContext)]);
@@ -116,7 +138,7 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={{ flex: 1, paddingBottom: keyboardPad }}>
         <View style={{ paddingHorizontal: spacing.xl, paddingTop: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <BackButton onPress={() => navigation.goBack()} accessibilityLabel="Back" />
           <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 20, color: colors.ink }}>
@@ -214,6 +236,35 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
             </>
           ) : null}
 
+          <Card>
+            <View style={{ gap: 12 }}>
+              <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+                Target glucose
+              </Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
+                The glucose you aim for. Used only to work out the correction part of the suggested dose. Kept on this device; leave empty to skip the correction.
+              </Text>
+              <FormField
+                label="Target glucose"
+                value={targetShown}
+                onChangeText={(t) => {
+                  setTargetText(t);
+                  setTargetMessage(null);
+                }}
+                unit="mg/dL"
+                keyboardType="decimal-pad"
+                placeholder="e.g. 110"
+                error={targetError ?? undefined}
+              />
+              {targetMessage ? (
+                <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink }}>
+                  {targetMessage}
+                </Text>
+              ) : null}
+              <SecondaryButton label="Save target" onPress={() => void saveTarget()} />
+            </View>
+          </Card>
+
           {history.length > 0 ? (
             <View style={{ gap: 8 }}>
               <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>Earlier versions (read only)</Text>
@@ -235,7 +286,7 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
             </View>
           ) : null}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

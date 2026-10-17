@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, Image, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MealConfidence } from '../../api/mealsApi';
 import { BackButton, PrimaryButton, RoundButton, SecondaryButton } from '../../components/Buttons';
 import { EventTimePicker, FormField } from '../../components/FormField';
@@ -12,6 +12,7 @@ import { PixelMascot } from '../../components/PixelMascot';
 import { ScanScreenProps } from '../../navigation/types';
 import { useQuickAdd } from '../../components/QuickAdd';
 import { useEvents } from '../../services/EventsProvider';
+import { useKeyboardInset } from '../../services/useKeyboardInset';
 import {
   buildMealEvent,
   FieldErrors,
@@ -49,6 +50,10 @@ const round = (value: number) => Math.round(value);
 export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealReview'>) {
   const colors = useColors();
   const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { bottomInset } = useKeyboardInset();
+  // Lift the pinned Confirm / Cancel footer above the keyboard (the SafeAreaView already pads the home indicator).
+  const keyboardPad = Math.max(0, bottomInset - insets.bottom);
   // The photo is context, the carbs number is the point: shrink it on short screens so the number stays above the footer.
   const photoHeight = windowHeight < 700 ? 88 : 150;
   const { photo } = route.params;
@@ -243,7 +248,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={{ flex: 1, paddingBottom: keyboardPad }}>
         <View style={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <BackButton onPress={() => navigation.goBack()} accessibilityLabel="Back to camera" />
           <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 20, color: colors.ink }}>
@@ -378,7 +383,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
           onConfirmResult={(analysis) => void confirm(analysis, analysis.mealEventId ?? null)}
           onConfirmManual={() => void confirm(null, state.kind === 'needs_manual_entry' ? state.mealEventId : null)}
         />
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

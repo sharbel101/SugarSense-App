@@ -1,10 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { goToScan } from '../navigation/navigationRef';
 import type { InsulinKind } from '../services/events';
 import { useEvents } from '../services/EventsProvider';
 import { useForecast } from '../services/ForecastProvider';
-import { useAvailableHeight } from '../services/useAvailableHeight';
+import { useKeyboardInset } from '../services/useKeyboardInset';
 import { findMealRef, type MealRef } from '../services/mealRefs';
 import { forecastPrompts } from '../services/forecastView';
 import { radius, shadow, spacing, touch, useColors } from '../theme';
@@ -86,7 +87,7 @@ export function QuickAddFab({ hidden }: { hidden: boolean }) {
 function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const available = useAvailableHeight();
+  const { bottomInset, available } = useKeyboardInset();
   const [mode, setMode] = useState<QuickAddMode>(options.mode ?? 'menu');
   const [meal, setMeal] = useState<MealRef | undefined>(options.meal);
 
@@ -100,14 +101,15 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+      {/* paddingBottom lifts the sheet above the keyboard (iOS Safari does not resize the layout viewport). */}
+      <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: bottomInset }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
           onPress={onClose}
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' }}
         />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View>
           <View
             style={{
               backgroundColor: colors.ground,
@@ -116,7 +118,7 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
               // A real pixel cap (a percentage of an auto-height parent caps nothing): the sheet can never
               // grow past the top of the screen, and its ScrollView scrolls inside it.
               maxHeight: Math.max(240, Math.floor(available - insets.top - 12)),
-              paddingBottom: Math.max(insets.bottom, spacing.md),
+              paddingBottom: bottomInset > 0 ? spacing.md : Math.max(insets.bottom, spacing.md),
             }}
           >
             <View
@@ -148,13 +150,22 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
               contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingBottom: spacing.lg, gap: 14 }}
             >
               {mode === 'menu' ? <Menu onPick={setMode} onPickNone={(m) => { setMeal(m); setMode('none'); }} /> : null}
-              {mode === 'meal' ? <MealForm onDone={onClose} onBack={() => setMode('menu')} /> : null}
+              {mode === 'meal' ? (
+                <MealForm
+                  onDone={onClose}
+                  onBack={() => setMode('menu')}
+                  onPhoto={() => {
+                    onClose();
+                    goToScan();
+                  }}
+                />
+              ) : null}
               {mode === 'insulin' ? <InsulinForm onDone={onClose} onBack={() => setMode('menu')} preselectMeal={meal} initialKind={options.insulinKind} /> : null}
               {mode === 'none' && meal ? <NoInsulinConfirm meal={meal} onDone={onClose} /> : null}
               {mode === 'list' ? <EventList onDone={onClose} /> : null}
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </View>
     </Modal>
   );

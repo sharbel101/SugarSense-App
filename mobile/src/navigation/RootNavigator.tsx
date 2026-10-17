@@ -1,5 +1,5 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
@@ -13,10 +13,10 @@ import { MealHistoryScreen } from '../screens/MealHistoryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SafetyScreen } from '../screens/SafetyScreen';
 import { useTheme } from '../theme';
+import { navRef } from './navigationRef';
 import { ScanNavigator } from './ScanNavigator';
 import { RootStackParamList, TabParamList } from './types';
 
-const navRef = createNavigationContainerRef();
 /** Screens where the global "+" is hidden: the scan flow is deliberately immersive, Profile is a modal. */
 // Home has its own Add meal / Log insulin buttons, so the floating + is hidden there.
 const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory']);

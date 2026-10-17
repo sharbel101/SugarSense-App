@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
-import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Polygon, Polyline } from 'react-native-svg';
+import { monotonePath, polylinePath } from '../services/chartPath';
 import { nearestForecastPoint, type ForecastPoint } from '../services/glucoseChart';
 import type { EventMarker } from '../services/forecastChart';
 import { touch, useColors } from '../theme';
@@ -34,6 +35,10 @@ type Props = {
   markers?: EventMarker[];
   /** Text for a tapped marker, e.g. "Meal, 45 g - insulin not recorded". */
   markerLabel?: (marker: EventMarker) => string;
+  /** `history` = the points are past readings (tooltip says "N min ago"); default `forecast`. */
+  scrubKind?: 'forecast' | 'history';
+  /** Draw the measured line as a smooth curve through the readings (default true). */
+  smooth?: boolean;
   /** Text alternative for screen readers - describe the trend and the range, not exact values. */
   accessibilityLabel: string;
 };
@@ -42,21 +47,24 @@ function toPoints(points: ChartPoint[]) {
   return points.map((p) => `${p.x},${p.y}`).join(' ');
 }
 
-
 type StaticProps = Pick<
   Props,
   'viewBoxWidth' | 'viewBoxHeight' | 'actual' | 'predicted' | 'band' | 'nowX' | 'highlightPoint' | 'extension' | 'baselineLine'
-> & { height: number; gridLinesY: number[] };
+> & { width: number; height: number; gridLinesY: number[]; smooth: boolean };
 
 /**
  * The lines, band and grid. Memoised: while a finger or mouse scrubs across the chart only the
- * small overlay re-renders, never these polylines (re-drawing them on every move was the lag).
- * `pointerEvents="none"` keeps the SVG itself out of hit-testing, so a drag can neither select the
- * SVG nor report coordinates relative to one of its inner shapes.
+ * small overlay re-renders, never these lines (re-drawing them on every move was the lag).
+ *
+ * Drawn in REAL PIXELS (the measured width and height), not a stretched viewBox: with
+ * `preserveAspectRatio="none"` the latest-reading dot became an ellipse and line widths varied with
+ * direction, which is why the chart looked stretched. `pointerEvents="none"` keeps the SVG out of
+ * hit-testing, so a drag can neither select it nor report coordinates relative to an inner shape.
  */
 const StaticLayers = React.memo(function StaticLayers({
   viewBoxWidth,
   viewBoxHeight,
+  width,
   height,
   actual,
   predicted,
@@ -66,101 +74,77 @@ const StaticLayers = React.memo(function StaticLayers({
   gridLinesY,
   extension,
   baselineLine,
+  smooth,
 }: StaticProps) {
   const colors = useColors();
-  const lastActual = actual[actual.length - 1];
-  const actualPts = useMemo(() => toPoints(actual), [actual]);
-  const predictedPts = useMemo(() => toPoints(predicted), [predicted]);
-  const bandPts = useMemo(() => (band ? toPoints(band) : ''), [band]);
-  const extensionPts = useMemo(() => (extension ? toPoints(extension) : ''), [extension]);
-  const baselinePts = useMemo(() => (baselineLine ? toPoints(baselineLine) : ''), [baselineLine]);
+  const sx = width / viewBoxWidth;
+  const sy = height / viewBoxHeight;
+  const scaled = useMemo(() => {
+    const sc = (pts?: ChartPoint[]) => (pts ?? []).map((q) => ({ x: q.x * sx, y: q.y * sy }));
+    return {
+      actual: sc(actual),
+      predicted: sc(predicted),
+      band: sc(band),
+      extension: sc(extension),
+      baseline: sc(baselineLine),
+      highlight: highlightPoint ? { x: highlightPoint.x * sx, y: highlightPoint.y * sy } : null,
+    };
+  }, [actual, predicted, band, extension, baselineLine, highlightPoint, sx, sy]);
+  const actualPath = useMemo(() => (smooth ? monotonePath(scaled.actual) : polylinePath(scaled.actual)), [scaled.actual, smooth]);
+  const predictedPts = useMemo(() => toPoints(scaled.predicted), [scaled.predicted]);
+  const bandPts = useMemo(() => toPoints(scaled.band), [scaled.band]);
+  const extensionPts = useMemo(() => toPoints(scaled.extension), [scaled.extension]);
+  const baselinePts = useMemo(() => toPoints(scaled.baseline), [scaled.baseline]);
+  const last = scaled.actual[scaled.actual.length - 1];
   return (
-      <Svg
-        width="100%"
-        height={height}
-        pointerEvents="none"
-        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
-        preserveAspectRatio="none"
-      >
-        {gridLinesY.map((y) => (
-          <Line key={y} x1={0} y1={y} x2={viewBoxWidth} y2={y} stroke={colors.divider} strokeWidth={1} />
-        ))}
+    <Svg width="100%" height={height} pointerEvents="none" viewBox={`0 0 ${width} ${height}`}>
+      {gridLinesY.map((y) => (
+        <Line key={y} x1={0} y1={y * sy} x2={width} y2={y * sy} stroke={colors.divider} strokeWidth={1} />
+      ))}
 
-        {band && band.length > 0 ? (
-          <Polygon points={bandPts} fill={colors.blue500} opacity={0.16} />
-        ) : null}
+      {scaled.band.length > 0 ? <Polygon points={bandPts} fill={colors.blue500} opacity={0.16} /> : null}
 
+      <Path d={actualPath} fill="none" stroke={colors.blue700} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+
+      {nowX !== undefined ? (
+        <Line x1={nowX * sx} y1={0} x2={nowX * sx} y2={height} stroke={colors.ink4} strokeWidth={1.5} strokeDasharray="3 4" />
+      ) : null}
+
+      {scaled.baseline.length > 1 ? (
+        <Polyline points={baselinePts} fill="none" stroke={colors.ink4} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      ) : null}
+
+      {scaled.extension.length > 1 ? (
         <Polyline
-          points={actualPts}
+          points={extensionPts}
           fill="none"
-          stroke={colors.blue700}
+          stroke={colors.blue500}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray="1 11"
+          opacity={0.7}
+        />
+      ) : null}
+
+      {scaled.predicted.length > 0 ? (
+        <Polyline
+          points={predictedPts}
+          fill="none"
+          stroke={colors.blue500}
           strokeWidth={3}
           strokeLinecap="round"
           strokeLinejoin="round"
+          strokeDasharray="1 7"
         />
+      ) : null}
 
-        {nowX !== undefined ? (
-          <Line
-            x1={nowX}
-            y1={0}
-            x2={nowX}
-            y2={viewBoxHeight}
-            stroke={colors.ink4}
-            strokeWidth={1.5}
-            strokeDasharray="3 4"
-          />
-        ) : null}
+      {last ? <Circle cx={last.x} cy={last.y} r={5} fill={colors.blue700} stroke={colors.surface} strokeWidth={2} /> : null}
 
-        {baselineLine && baselineLine.length > 1 ? (
-          <Polyline
-            points={baselinePts}
-            fill="none"
-            stroke={colors.ink4}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : null}
-
-        {extension && extension.length > 1 ? (
-          <Polyline
-            points={extensionPts}
-            fill="none"
-            stroke={colors.blue500}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="1 11"
-            opacity={0.7}
-          />
-        ) : null}
-
-        {predicted.length > 0 ? (
-          <Polyline
-            points={predictedPts}
-            fill="none"
-            stroke={colors.blue500}
-            strokeWidth={3}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="1 7"
-          />
-        ) : null}
-
-        {lastActual ? <Circle cx={lastActual.x} cy={lastActual.y} r={4.5} fill={colors.blue700} /> : null}
-
-        {highlightPoint ? (
-          <Circle
-            cx={highlightPoint.x}
-            cy={highlightPoint.y}
-            r={5}
-            fill={colors.surface}
-            stroke={colors.blue600}
-            strokeWidth={2.5}
-          />
-        ) : null}
-      </Svg>
-
+      {scaled.highlight ? (
+        <Circle cx={scaled.highlight.x} cy={scaled.highlight.y} r={5} fill={colors.surface} stroke={colors.blue600} strokeWidth={2.5} />
+      ) : null}
+    </Svg>
   );
 });
 
@@ -239,6 +223,8 @@ export function GlucoseChart({
   baselineLine,
   markers,
   markerLabel,
+  scrubKind = 'forecast',
+  smooth = true,
   accessibilityLabel,
 }: Props) {
   const colors = useColors();
@@ -246,6 +232,7 @@ export function GlucoseChart({
   const [scrub, setScrub] = useState<ForecastPoint | null>(null);
   const [pickedMarker, setPickedMarker] = useState<string | null>(null);
   const widthRef = useRef(0);
+  const [layoutWidth, setLayoutWidth] = useState(0);
   const pointsRef = useRef<ForecastPoint[]>([]);
   const vbWidthRef = useRef(viewBoxWidth);
   useEffect(() => {
@@ -275,6 +262,7 @@ export function GlucoseChart({
       accessibilityHint={canScrub ? 'Press and drag across the dotted forecast line to read predicted values.' : undefined}
       onLayout={(e) => {
         widthRef.current = e.nativeEvent.layout.width;
+        setLayoutWidth(Math.round(e.nativeEvent.layout.width));
       }}
       onStartShouldSetResponder={() => canScrub}
       onMoveShouldSetResponder={() => canScrub}
@@ -292,7 +280,9 @@ export function GlucoseChart({
       <StaticLayers
         viewBoxWidth={viewBoxWidth}
         viewBoxHeight={viewBoxHeight}
+        width={layoutWidth > 0 ? layoutWidth : viewBoxWidth}
         height={height ?? viewBoxHeight}
+        smooth={smooth}
         actual={actual}
         predicted={predicted}
         band={band}
@@ -357,7 +347,11 @@ export function GlucoseChart({
             {Math.round(scrub.value)} mg/dL
           </Text>
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
-            Predicted, +{scrub.minutesAhead} min
+            {scrubKind === 'history'
+              ? scrub.minutesAhead === 0
+                ? 'Latest reading'
+                : `${Math.abs(scrub.minutesAhead)} min ago`
+              : `Predicted, +${scrub.minutesAhead} min`}
           </Text>
           {scrub.low !== undefined && scrub.high !== undefined ? (
             <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>

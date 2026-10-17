@@ -12,7 +12,6 @@ import { forecastPrompts, formatCarbsOnBoard, formatInsulinOnBoard, ON_BOARD_EXP
 import { findMealRef } from '../services/mealRefs';
 import { formatClock } from '../services/glucoseState';
 import { radius, touch, useColors } from '../theme';
-import { SecondaryButton } from './Buttons';
 import { useQuickAdd } from './QuickAdd';
 
 export type ForecastChartState = {
@@ -119,21 +118,49 @@ export function ForecastPrompts({ forecast }: { forecast: ForecastOkDisplay }) {
   const mealFor = (id: string | null) => (id ? findMealRef(records, recent.kind === 'ok' ? recent.meals : [], id, -new Date().getTimezoneOffset()) : null);
 
   return (
-    <View style={{ gap: 10 }}>
+    <View style={{ gap: 8 }}>
       {prompts.map((p) => {
-        const meal = p.kind === 'meal_without_insulin' ? mealFor(p.eventId) : null;
+        const warning = p.kind === 'meal_without_insulin';
+        const meal = warning ? mealFor(p.eventId) : null;
+        const action: { label: string; run: () => void } | null =
+          p.kind === 'set_ratio'
+            ? { label: 'Settings', run: () => nav.navigate('InsulinSettings' as never) }
+            : warning
+              ? { label: 'Add insulin', run: () => open(meal ? { mode: 'insulin', meal } : { mode: 'insulin' }) }
+              : p.kind === 'dose_ambiguous'
+                ? { label: 'Review', run: () => open({ mode: 'list' }) }
+                : null;
         return (
-          <View key={p.kind} style={{ backgroundColor: colors.amber100, borderRadius: radius.row, padding: 14, gap: 8 }}>
-            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.amberDark, lineHeight: 20 }}>{p.text}</Text>
-            {p.kind === 'set_ratio' ? <SecondaryButton label="Open insulin settings" onPress={() => nav.navigate('InsulinSettings' as never)} /> : null}
-            {p.kind === 'meal_without_insulin' && meal ? (
-              <>
-                <SecondaryButton label="Record insulin taken" onPress={() => open({ mode: 'insulin', meal })} />
-                <SecondaryButton label="I took none" onPress={() => open({ mode: 'none', meal })} />
-              </>
-            ) : null}
-            {p.kind === 'dose_ambiguous' ? (
-              <SecondaryButton label="Review what you logged" onPress={() => open({ mode: 'list' })} />
+          <View
+            key={p.kind}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              backgroundColor: warning ? colors.red100 : colors.amber100,
+              borderRadius: radius.row,
+              paddingLeft: 14,
+              paddingRight: 6,
+              minHeight: touch.min,
+            }}
+          >
+            <Text
+              accessibilityRole={warning ? 'alert' : undefined}
+              style={{ flex: 1, paddingVertical: 8, fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: warning ? colors.red600 : colors.amberDark, lineHeight: 20 }}
+            >
+              {p.text}
+            </Text>
+            {action ? (
+              <Pressable
+                onPress={action.run}
+                accessibilityRole="button"
+                accessibilityLabel={`${action.label}: ${p.text}`}
+                style={{ minHeight: touch.min, paddingHorizontal: 10, justifyContent: 'center' }}
+              >
+                <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: warning ? colors.red600 : colors.amberDark, textDecorationLine: 'underline' }}>
+                  {action.label}
+                </Text>
+              </Pressable>
             ) : null}
           </View>
         );

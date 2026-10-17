@@ -71,7 +71,7 @@ export function forecastPrompts(f: ForecastOkDisplay): ForecastPrompt[] {
     const meal = f.mealAware.events.find((e) => e.type === 'meal' && e.role === 'range_only' && e.reason === 'insulin_not_recorded');
     out.push({
       kind: 'meal_without_insulin',
-      text: 'A meal you logged has no insulin recorded, so it is not moving the forecast line yet. The range is wider to cover that.',
+      text: 'This meal has no insulin recorded.',
       eventId: meal?.id ?? null,
     });
   }
@@ -79,7 +79,7 @@ export function forecastPrompts(f: ForecastOkDisplay): ForecastPrompt[] {
   // server already widens the range for it.
   const ambiguous = f.mealAware.events.find((e) => e.reason === 'insulin_link_ambiguous');
   if (ambiguous) {
-    out.push({ kind: 'dose_ambiguous', text: 'A dose could belong to two meals; tell us which.', eventId: ambiguous.id });
+    out.push({ kind: 'dose_ambiguous', text: 'A dose could belong to two meals - tell us which.', eventId: ambiguous.id });
   }
   return out;
 }
