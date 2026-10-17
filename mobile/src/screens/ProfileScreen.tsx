@@ -92,7 +92,9 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
               {section.rows.map((row, index) => (
                 <Pressable
                   key={row.label}
-                  onPress={() => {}}
+                  onPress={() => {
+                    if (row.label === 'Insulin settings') navigation.navigate('InsulinSettings');
+                  }}
                   accessibilityRole="button"
                   style={{
                     flexDirection: 'row',

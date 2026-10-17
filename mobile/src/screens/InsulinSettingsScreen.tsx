@@ -47,6 +47,8 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
   const [errors, setErrors] = useState<TherapyFormErrors | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showMore, setShowMore] = useState(false);
+  const extraRowErrors = Boolean(errors && (errors.note || errors.rows.slice(1).some((r) => r.startTime || r.icr || r.isf)));
 
   const fetchAll = () => Promise.all([getTherapySettings(apiContext), getTherapyHistory(apiContext)]);
 
@@ -103,7 +105,7 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
     const out = await putTherapySettings(apiContext, result.body);
     setSaving(false);
     if (out.kind === 'ok') {
-      setMessage(`Saved as version ${out.value.version}. Earlier forecasts keep the values they used.`);
+      setMessage(`Saved (version ${out.value.version}).`);
       load();
     } else if (out.kind === 'invalid') {
       setMessage(out.reason);
@@ -148,42 +150,24 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
 
           {!unavailable ? (
             <>
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
-                Insulin-to-carb ratio: grams of carbohydrate covered by 1 unit of rapid-acting insulin (for example 1 unit : 10 g). Correction
-                factor: how many mg/dL 1 unit lowers glucose.
-              </Text>
-              {rows.map((r, i) => (
-                <Card key={i}>
-                  <View style={{ gap: 12 }}>
-                    <FormField
-                      label={i === 0 ? 'From (24 h, first must be 00:00)' : 'From (24 h)'}
-                      value={r.startTime}
-                      onChangeText={(t) => setRow(i, { startTime: t })}
-                      placeholder="00:00"
-                      keyboardType="numbers-and-punctuation"
-                      error={errors?.rows[i]?.startTime}
-                    />
-                    <FormField label="Grams covered by 1 unit" required value={r.icr} onChangeText={(t) => setRow(i, { icr: t })} unit="g" keyboardType="decimal-pad" error={errors?.rows[i]?.icr} />
-                    <FormField label="mg/dL lowered by 1 unit" value={r.isf} onChangeText={(t) => setRow(i, { isf: t })} unit="mg/dL" keyboardType="decimal-pad" error={errors?.rows[i]?.isf} />
-                    {rows.length > 1 ? <SecondaryButton label="Remove this time of day" onPress={() => setRows((x) => x.filter((_, j) => j !== i))} /> : null}
-                  </View>
-                </Card>
-              ))}
-              {rows.length < 8 ? <SecondaryButton label="Add a time of day" onPress={() => setRows((x) => [...x, { startTime: '', icr: '', isf: '' }])} /> : null}
-              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
-                Leave the correction factor blank to keep the one already saved.
-              </Text>
+              <Card>
+                <View style={{ gap: 12 }}>
+                  <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+                    Insulin-to-carb ratio
+                  </Text>
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
+                    Grams of carbohydrate covered by 1 unit of rapid-acting insulin.
+                  </Text>
+                  <FormField label="1 unit covers" required value={rows[0].icr} onChangeText={(t) => setRow(0, { icr: t })} unit="g" keyboardType="decimal-pad" placeholder="e.g. 10" error={errors?.rows[0]?.icr} />
+                  <FormField label="Correction factor: 1 unit lowers glucose by (optional)" value={rows[0].isf} onChangeText={(t) => setRow(0, { isf: t })} unit="mg/dL" keyboardType="decimal-pad" error={errors?.rows[0]?.isf} />
+                </View>
+              </Card>
 
               <View style={{ gap: 8 }}>
                 <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>Where do these values come from? *</Text>
                 <ChoiceChips options={SOURCES} value={source ?? ('' as TherapySource)} onChange={setSource} />
                 {errors?.source ? <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.red600 }}>{errors.source}</Text> : null}
               </View>
-              <View style={{ gap: 8 }}>
-                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>Insulin type (optional)</Text>
-                <ChoiceChips options={INSULIN} value={insulinType ?? ('' as 'rapid')} onChange={setInsulinType} />
-              </View>
-              <FormField label="Note (optional)" value={note} onChangeText={setNote} multiline maxLength={500} error={errors?.note} />
 
               {errors?.general ? <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600 }}>{errors.general}</Text> : null}
               {message ? (
@@ -191,8 +175,42 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
                   {message}
                 </Text>
               ) : null}
-              <PrimaryButton label="Save as a new version" onPress={save} loading={saving} />
-              {current?.disclaimer ? <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, lineHeight: 18 }}>{current.disclaimer}</Text> : null}
+              <PrimaryButton label="Save" onPress={save} loading={saving} />
+
+              <SecondaryButton
+                label={showMore || extraRowErrors ? 'Hide more options' : 'More options: times of day, insulin type, note'}
+                onPress={() => setShowMore((v) => !v)}
+              />
+              {showMore || rows.length > 1 || extraRowErrors ? (
+                <View style={{ gap: 14 }}>
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
+                    The first row above applies from 00:00. Add a time of day if your ratio changes during the day.
+                  </Text>
+                  {rows.slice(1).map((r, k) => {
+                    const i = k + 1;
+                    return (
+                      <Card key={i}>
+                        <View style={{ gap: 12 }}>
+                          <FormField label="From (24 h)" value={r.startTime} onChangeText={(t) => setRow(i, { startTime: t })} placeholder="12:00" keyboardType="numbers-and-punctuation" error={errors?.rows[i]?.startTime} />
+                          <FormField label="1 unit covers" required value={r.icr} onChangeText={(t) => setRow(i, { icr: t })} unit="g" keyboardType="decimal-pad" error={errors?.rows[i]?.icr} />
+                          <FormField label="Correction factor (optional)" value={r.isf} onChangeText={(t) => setRow(i, { isf: t })} unit="mg/dL" keyboardType="decimal-pad" error={errors?.rows[i]?.isf} />
+                          <SecondaryButton label="Remove this time of day" onPress={() => setRows((x) => x.filter((_, j) => j !== i))} />
+                        </View>
+                      </Card>
+                    );
+                  })}
+                  {rows.length < 8 ? <SecondaryButton label="Add a time of day" onPress={() => setRows((x) => [...x, { startTime: '', icr: '', isf: '' }])} /> : null}
+                  <View style={{ gap: 8 }}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>Insulin type</Text>
+                    <ChoiceChips options={INSULIN} value={insulinType ?? ('' as 'rapid')} onChange={setInsulinType} />
+                  </View>
+                  <FormField label="Note" value={note} onChangeText={setNote} multiline maxLength={500} error={errors?.note} />
+                </View>
+              ) : null}
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, lineHeight: 18 }}>
+                {current?.status === 'set' ? 'Each save creates a new version. Earlier forecasts keep the values they used. ' : ''}
+                {current?.disclaimer ?? ''}
+              </Text>
             </>
           ) : null}
 
