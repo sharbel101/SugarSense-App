@@ -124,8 +124,12 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
       return;
     }
     const parsed = Number(editValue);
-    if (Number.isFinite(parsed) && parsed >= 0) {
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 400) {
       setState({ kind: 'result', analysis: editItemCarbsG(state.analysis, editingIndex, parsed) });
+      setConfirmMessage(null);
+    } else {
+      // Never keep a number the server would reject (max 400 g) or one that is not a number.
+      setConfirmMessage('Carbs for one item must be a number from 0 to 400 g. Your change was not applied.');
     }
     setEditingIndex(null);
   };
@@ -228,7 +232,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
             accessible
             accessibilityRole="image"
             accessibilityLabel="Photo of your meal"
-            style={{ height: 220, borderRadius: 22, backgroundColor: colors.divider, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}
+            style={{ height: 150, borderRadius: 22, backgroundColor: colors.divider, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}
           >
             {/* The photo stays visible and untouched while analyzing - just a small loading badge
                 in the corner, not a scrim covering it. */}
@@ -389,83 +393,6 @@ function ResultContent({
   return (
     <>
       <FormField label="Meal name" value={mealName} onChangeText={onMealNameChange} maxLength={80} />
-      <View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>SugarSense detected</Text>
-          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3 }}>
-            {analysis.items.length} item{analysis.items.length === 1 ? '' : 's'} · ~{round(analysis.totalCaloriesKcal)} kcal
-          </Text>
-        </View>
-        <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.row }}>
-          {analysis.items.map((item, index) => {
-            const tone = confidenceTone(colors, item.confidence);
-            return (
-              <View
-                key={`${item.name}-${index}`}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderBottomWidth: index === analysis.items.length - 1 ? 0 : 1,
-                  borderBottomColor: colors.divider,
-                }}
-              >
-                <View style={{ flex: 1, paddingRight: 10 }}>
-                  <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: colors.ink }}>
-                    {item.name}
-                    {item.edited ? ' · edited' : ''}
-                  </Text>
-                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3, marginTop: 1 }}>
-                    {item.portionDescription} · ~{round(item.estimatedGrams)}g
-                  </Text>
-                  <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: tone.color, marginTop: 2 }}>
-                    {tone.label}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {editingIndex === index ? (
-                    <TextInput
-                      value={editValue}
-                      onChangeText={onEditValueChange}
-                      onSubmitEditing={onCommitEdit}
-                      onBlur={onCommitEdit}
-                      keyboardType="decimal-pad"
-                      autoFocus
-                      accessibilityLabel={`Carbs for ${item.name} in grams`}
-                      style={{
-                        width: 64,
-                        fontFamily: 'Manrope_600SemiBold',
-                        fontSize: 14,
-                        color: colors.ink,
-                        borderWidth: 1,
-                        borderColor: colors.blue600,
-                        borderRadius: radius.chip,
-                        paddingHorizontal: 8,
-                        paddingVertical: 6,
-                        textAlign: 'right',
-                      }}
-                    />
-                  ) : (
-                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>{round(item.netCarbsG)}g</Text>
-                  )}
-                  <RoundButton
-                    accessibilityLabel={`Edit ${item.name}`}
-                    size={26}
-                    bg="transparent"
-                    edge="end"
-                    onPress={() => onBeginEdit(index, item.netCarbsG)}
-                  >
-                    <Icon name="edit" size={14} color={colors.ink3} />
-                  </RoundButton>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      </View>
-
       <Card>
         <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           Estimated carbohydrates
@@ -509,6 +436,84 @@ function ResultContent({
           </Text>
         ) : null}
       </Card>
+      <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>SugarSense detected</Text>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3 }}>
+            {analysis.items.length} item{analysis.items.length === 1 ? '' : 's'} · ~{round(analysis.totalCaloriesKcal)} kcal
+          </Text>
+        </View>
+        <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.row }}>
+          {analysis.items.map((item, index) => {
+            const tone = confidenceTone(colors, item.confidence);
+            return (
+              <View
+                key={`${item.name}-${index}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderBottomWidth: index === analysis.items.length - 1 ? 0 : 1,
+                  borderBottomColor: colors.divider,
+                }}
+              >
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: colors.ink }}>
+                    {item.name}
+                    {item.edited ? ' · edited' : ''}
+                  </Text>
+                  <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: colors.ink3, marginTop: 1 }}>
+                    {item.portionDescription} · ~{round(item.estimatedGrams)}g
+                  </Text>
+                  <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: tone.color, marginTop: 2 }}>
+                    {tone.label}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {editingIndex === index ? (
+                    <TextInput
+                      value={editValue}
+                      onChangeText={onEditValueChange}
+                      onSubmitEditing={onCommitEdit}
+                      onBlur={onCommitEdit}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      autoFocus
+                      accessibilityLabel={`Carbs for ${item.name} in grams`}
+                      style={{
+                        width: 64,
+                        fontFamily: 'Manrope_600SemiBold',
+                        fontSize: 14,
+                        color: colors.ink,
+                        borderWidth: 1,
+                        borderColor: colors.blue600,
+                        borderRadius: radius.chip,
+                        paddingHorizontal: 8,
+                        paddingVertical: 6,
+                        textAlign: 'right',
+                      }}
+                    />
+                  ) : (
+                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>{round(item.netCarbsG)}g</Text>
+                  )}
+                  <RoundButton
+                    accessibilityLabel={`Edit ${item.name}`}
+                    size={26}
+                    bg="transparent"
+                    edge="end"
+                    onPress={() => onBeginEdit(index, item.netCarbsG)}
+                  >
+                    <Icon name="edit" size={14} color={colors.ink3} />
+                  </RoundButton>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+
       <EventTimePicker value={eatenAt} hhmm={eatenHhmm} onChange={onEatenAtChange} onChangeHhmm={onEatenHhmmChange} error={errors.time ?? errors.carbs} />
     </>
   );

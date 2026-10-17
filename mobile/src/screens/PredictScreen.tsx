@@ -121,6 +121,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
               </Card>
             ) : null}
 
+            {!mealAware ? (
             <Card>
               <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>About this forecast</Text>
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 6, lineHeight: 21 }}>
@@ -129,6 +130,7 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
                 {data.generatedAt ? ` Generated at ${formatClock(data.generatedAt)}.` : ''}
               </Text>
             </Card>
+            ) : null}
           </>
         ) : view.kind === 'ok' ? null : (
           <Card elevated>

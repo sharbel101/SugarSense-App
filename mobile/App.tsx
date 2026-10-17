@@ -7,7 +7,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/manrope';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { QuickAddProvider } from './src/components/QuickAdd';
@@ -32,10 +32,18 @@ export default function App() {
     Manrope_800ExtraBold,
   });
 
+  // On a slow connection the five font files can take a long time; a blank screen is worse than a
+  // brief fallback font, so show the app after a few seconds and let the fonts swap in when ready.
+  const [fontWaitOver, setFontWaitOver] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setFontWaitOver(true), 2500);
+    return () => clearTimeout(t);
+  }, []);
+
   // Web only (a no-op elsewhere): a home-screen web app never reloads on its own, so it asks.
   useEffect(() => startWebUpdateWatcher(), []);
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded && !fontWaitOver) {
     return null;
   }
 

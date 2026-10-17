@@ -7,7 +7,6 @@ import { useForecast } from '../services/ForecastProvider';
 import { findMealRef, type MealRef } from '../services/mealRefs';
 import { forecastPrompts } from '../services/forecastView';
 import { radius, shadow, spacing, touch, useColors } from '../theme';
-import { SecondaryButton } from './Buttons';
 import { EventList } from './EventList';
 import { Icon, IconName } from './Icon';
 import { InsulinForm, MealForm, NoInsulinConfirm } from './QuickAddForms';
@@ -136,11 +135,10 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
               contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingBottom: spacing.lg, gap: 14 }}
             >
               {mode === 'menu' ? <Menu onPick={setMode} onPickNone={(m) => { setMeal(m); setMode('none'); }} /> : null}
-              {mode === 'meal' ? <MealForm onDone={onClose} /> : null}
-              {mode === 'insulin' ? <InsulinForm onDone={onClose} preselectMeal={meal} initialKind={options.insulinKind} /> : null}
+              {mode === 'meal' ? <MealForm onDone={onClose} onBack={() => setMode('menu')} /> : null}
+              {mode === 'insulin' ? <InsulinForm onDone={onClose} onBack={() => setMode('menu')} preselectMeal={meal} initialKind={options.insulinKind} /> : null}
               {mode === 'none' && meal ? <NoInsulinConfirm meal={meal} onDone={onClose} /> : null}
               {mode === 'list' ? <EventList onDone={onClose} /> : null}
-              {mode === 'meal' || mode === 'insulin' || mode === 'none' ? <SecondaryButton label="Back" onPress={() => setMode('menu')} /> : null}
             </ScrollView>
           </View>
         </KeyboardAvoidingView>

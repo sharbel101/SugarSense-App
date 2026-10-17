@@ -178,7 +178,7 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
               <PrimaryButton label="Save" onPress={save} loading={saving} />
 
               <SecondaryButton
-                label={showMore || extraRowErrors ? 'Hide more options' : 'More options: times of day, insulin type, note'}
+                label={showMore || extraRowErrors ? 'Hide more options' : 'More options'}
                 onPress={() => setShowMore((v) => !v)}
               />
               {showMore || rows.length > 1 || extraRowErrors ? (

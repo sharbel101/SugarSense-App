@@ -51,11 +51,11 @@ function MoreDetails({ children, forceOpen }: { children: React.ReactNode; force
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
         aria-expanded={shown}
-        accessibilityLabel={shown ? 'Hide extra details' : 'Add more details: time, notes and more'}
+        accessibilityLabel={shown ? 'Hide extra details' : 'Add more details: notes and more'}
         style={{ minHeight: touch.min, justifyContent: 'center' }}
       >
         <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.blue600 }}>
-          {shown ? 'Fewer details ▲' : 'More details (time, notes...) ▼'}
+          {shown ? 'Fewer details ▲' : 'More details (notes...) ▼'}
         </Text>
       </Pressable>
       {shown ? children : null}
@@ -145,7 +145,7 @@ function useRecord(id: string | null): EventRecord | null {
 
 // -------------------------------------------------------------------------------------- meal form
 
-export function MealForm({ onDone }: { onDone: () => void }) {
+export function MealForm({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const colors = useColors();
   const { addEvent, discard, saveAnyway, sendNow } = useEvents();
   const idRef = useRef<string | null>(null);
@@ -200,11 +200,11 @@ export function MealForm({ onDone }: { onDone: () => void }) {
       {!record ? (
         <>
           <FormField label="Carbohydrates" required value={carbs} onChangeText={setCarbs} unit="g" keyboardType="decimal-pad" placeholder="e.g. 45" error={errors.carbs} />
+          <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
           <PrimaryButton label="Save carbs" onPress={submit} />
           <ErrorSummary errors={errors} />
-          <MoreDetails forceOpen={Boolean(errors.time || errors.fat || errors.protein || errors.fiber || errors.notes)}>
+          <MoreDetails forceOpen={Boolean(errors.fat || errors.protein || errors.fiber || errors.notes)}>
             <FormField label="Meal description" value={label} onChangeText={setLabel} placeholder="e.g. Pasta" maxLength={80} />
-            <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
             <CheckRow checked={approximate} onChange={setApproximate} label="The time is approximate" />
             <View style={{ gap: 8 }}>
               <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>How fast does it hit?</Text>
@@ -215,6 +215,7 @@ export function MealForm({ onDone }: { onDone: () => void }) {
             <FormField label="Fibre" value={fiber} onChangeText={setFiber} unit="g" keyboardType="decimal-pad" error={errors.fiber} />
             <FormField label="Notes" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
           </MoreDetails>
+          <SecondaryButton label="Back" onPress={onBack} />
         </>
       ) : null}
     </>
@@ -237,7 +238,7 @@ function useTherapyInsulinType(): InsulinType | null {
   return type;
 }
 
-export function InsulinForm({ onDone, preselectMeal, initialKind }: { onDone: () => void; preselectMeal?: MealRef; initialKind?: InsulinKind }) {
+export function InsulinForm({ onDone, onBack, preselectMeal, initialKind }: { onDone: () => void; onBack: () => void; preselectMeal?: MealRef; initialKind?: InsulinKind }) {
   const colors = useColors();
   const { addEvent, discard, saveAnyway, sendNow, records, recent, refreshRecent } = useEvents();
   const idRef = useRef<string | null>(null);
@@ -329,10 +330,11 @@ export function InsulinForm({ onDone, preselectMeal, initialKind }: { onDone: ()
             ) : null}
             {notMealActing ? <Helper>Saved and shown, but not used as a meal or correction dose.</Helper> : null}
           </View>
+          <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
           <CheckRow checked={confirmedTaken} onChange={setConfirmedTaken} label="I confirm I actually took this insulin" error={errors.confirmedTaken} />
           <PrimaryButton label="Save insulin record" onPress={submit} />
           <ErrorSummary errors={errors} />
-          <MoreDetails forceOpen={Boolean(errors.time || errors.notes || errors.glucose)}>
+          <MoreDetails forceOpen={Boolean(errors.notes || errors.glucose)}>
             <View style={{ gap: 8 }}>
               <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>What was it for?</Text>
               <ChoiceChips options={INSULIN_KINDS} value={insulinKind} onChange={setInsulinKind} />
@@ -346,10 +348,10 @@ export function InsulinForm({ onDone, preselectMeal, initialKind }: { onDone: ()
             {insulinKind === 'correction' ? (
               <FormField label="Glucose at the time (stays on this device)" value={glucose} onChangeText={setGlucose} unit="mg/dL" keyboardType="decimal-pad" error={errors.glucose} />
             ) : null}
-            <EventTimePicker value={time} hhmm={hhmm} onChange={setTime} onChangeHhmm={setHhmm} error={errors.time} />
             <CheckRow checked={notSure} onChange={setNotSure} label="I'm not sure of the amount or time" />
             <FormField label="Notes (stays on this device)" value={notes} onChangeText={setNotes} multiline maxLength={300} error={errors.notes} />
           </MoreDetails>
+          <SecondaryButton label="Back" onPress={onBack} />
         </>
       ) : null}
     </>
