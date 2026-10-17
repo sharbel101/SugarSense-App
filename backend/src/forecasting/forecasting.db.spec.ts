@@ -575,6 +575,14 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       await setTestTherapy(c);
       const old = await c.api.addInsulin({ clientId: 'wi-null-dose-003', administeredAt: iso(nowSec() - 7 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual' });
       expect(ok(old.forecast).mealAware.allLoggedCounted).toBeNull(); // 7 h ago: nothing left to act, so nothing would change
+
+      // a small leftover (1 U taken 4 h ago still has ~2 mg/dL to give) is within the forecast's own noise: no second line
+      const small = rigWith();
+      await setTestTherapy(small);
+      const leftover = await small.api.addInsulin({ clientId: 'wi-null-dose-004', administeredAt: iso(nowSec() - 4 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 1, source: 'manual' });
+      const lf = ok(leftover.forecast);
+      expect(lf.mealAware.availability.insulinDosesRangeOnly).toBe(1);
+      expect(lf.mealAware.allLoggedCounted).toBeNull();
     });
 
     it('a meal with no insulin record: main line unchanged, the what-if view shows the uncovered rise; a what-if with meals left out shows none', async () => {

@@ -32,8 +32,11 @@ import { UsersService } from './users.service.js';
 /** Insulin tail (longest allowed duration) plus margin: events older than this cannot still be acting. */
 const LOOKBACK_SEC = 480 * 60;
 const FUTURE_SLACK_SEC = 5 * 60;
-/** The what-if view is only shown when it moves the line by at least this much (mg/dL) somewhere. */
-const ALL_COUNTED_MIN_DIFF_MGDL = 1;
+/**
+ * The what-if view is only shown when it moves the line by at least this much (mg/dL) somewhere. Below that it is within the noise of
+ * the forecast itself (the 80% range is about +/-25 mg/dL at one hour) and would only add a second line that looks the same.
+ */
+const ALL_COUNTED_MIN_DIFF_MGDL = 15;
 
 export interface RunOptions {
   horizonMin?: number;
