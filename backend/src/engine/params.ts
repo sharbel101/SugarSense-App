@@ -22,6 +22,7 @@ export const DEFAULT_ENGINE_PARAMS: EngineParams = {
   cC: 0.25, // spec section 4: engineering default for carbohydrate-count error
   cS: 0.25, // spec section 5: engineering default for sensitivity error
   uncertainDoseRel: 0.5, // engineering default for a dose the user marked uncertain (not from the spec)
+  trendOverlap: true, // remove what the glucose-only model already extrapolates from event-driven glucose movement
 };
 
 export const PARAM_BOUNDS = {
@@ -82,3 +83,34 @@ export const BASELINE_SIGMA_PRIOR: ReadonlyArray<readonly [minutes: number, rmse
   [60, 40.24],
 ];
 export const BASELINE_SIGMA_MEASURED_UP_TO_MIN = 60;
+
+/**
+ * How strongly the frozen glucose-only model (direct_120) extrapolates the recent trend, by forecast horizon.
+ *
+ * MEASURED, not assumed: ordinary-least-squares fit of the model's own stored outputs on its stored inputs,
+ *   (forecast_h - g0) = a_h + b_h * (g0 - 145) + k_h * slope15,   slope15 = (g0 - glucose 15 min ago) / 15
+ * over 5,171 live predictions (2026-09-09 to 2026-10-16, ~/forecast/forecast_history.db, read-only), R^2 0.28 at
+ * +5 min rising to 0.92 at +120 min. Units: minutes (mg/dL of forecast change per mg/dL/min of slope).
+ * Index i is the horizon 5*(i+1) minutes. Re-fit if the glucose-only model is ever replaced.
+ *
+ * Why it matters: the model cannot tell WHY glucose is moving, so the part of the current slope that is caused by a
+ * logged meal or dose is already in its forecast. The event layer removes that part (k_h * event-driven slope)
+ * before adding its own explicit increment, so the same rise is not counted twice.
+ */
+export const BASELINE_TREND_RESPONSE_MIN: readonly number[] = [
+  2.09, 3.591, 4.643, 5.386, 5.96, 6.493, 6.815, 7.01, 7.137, 7.252, 7.058, 7.127, 7.036, 6.843, 6.644, 6.423, 6.14,
+  5.887, 5.518, 5.296, 5.016, 4.833, 4.621, 4.222,
+];
+/** Window over which the slope is measured in the fit above (minutes). */
+export const TREND_SLOPE_WINDOW_MIN = 15;
+
+/** k_h by linear interpolation; below +5 min scaled toward 0, beyond +120 min held at the +120 value. */
+export function trendResponseAt(minutes: number): number {
+  const t = BASELINE_TREND_RESPONSE_MIN;
+  if (minutes <= 5) return (t[0] as number) * (minutes / 5);
+  if (minutes >= 120) return t[t.length - 1] as number;
+  const pos = minutes / 5 - 1;
+  const i = Math.floor(pos);
+  const f = pos - i;
+  return (t[i] as number) * (1 - f) + (t[i + 1] as number) * f;
+}

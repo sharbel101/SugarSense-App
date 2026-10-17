@@ -1,4 +1,5 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { NoStoreInterceptor } from '../common/no-store.interceptor.js';
 import { AppTokenGuard } from '../common/app-token.guard.js';
 import { createRateLimitGuard, envInt } from '../common/rate-limit.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
@@ -15,6 +16,7 @@ const MealsRateLimitGuard = createRateLimitGuard({
 
 @Controller('meals')
 @UseGuards(AppTokenGuard, MealsRateLimitGuard)
+@UseInterceptors(NoStoreInterceptor)
 export class MealsController {
   constructor(private readonly meals: MealsService) {}
 

@@ -67,12 +67,8 @@ export class MealForecastFlow {
           forecastNote: `This meal was not added to the forecast (${written.reason ?? 'rejected'}).`,
         };
       }
-      return {
-        mealEventId: written.meal?.mealId ?? null,
-        forecast: await this.safeForecast(),
-        forecastNote:
-          'Forecast includes this meal as an estimate. If you correct the amount, the forecast updates; your insulin entry is needed for the meal to move the central line.',
-      };
+      const forecast = await this.safeForecast();
+      return { mealEventId: written.meal?.mealId ?? null, forecast, forecastNote: forecastNoteFor(forecast) };
     } catch (err) {
       this.logger.warn(`photo flow failed after analysis ${describeDbError(err)}`);
       return {
@@ -99,5 +95,23 @@ export class MealForecastFlow {
       this.logger.warn(`forecast failed ${describeDbError(err)}`);
       return null;
     }
+  }
+}
+
+/**
+ * What to tell the person about the forecast that came back with their meal. Never claims the meal is in a
+ * forecast that does not exist.
+ */
+export function forecastNoteFor(forecast: ForecastDisplay | null): string {
+  if (forecast === null) return 'Your meal is saved, but the forecast could not be refreshed just now.';
+  switch (forecast.status) {
+    case 'ok':
+      return 'Forecast includes this meal as an estimate. If you correct the amount, the forecast updates; your insulin entry is needed for the meal to move the central line.';
+    case 'baseline_unavailable':
+      return 'Your meal is saved. The glucose forecast is not available right now, so no forecast is drawn for it yet; it will be used as soon as the forecast is back.';
+    case 'stale':
+      return 'Your meal is saved. The latest glucose reading is too old to forecast from, so no forecast is shown.';
+    default:
+      return 'Your meal is saved. Glucose is not available right now, so no forecast is shown.';
   }
 }

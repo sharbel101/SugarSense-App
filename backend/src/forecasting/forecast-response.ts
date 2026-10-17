@@ -65,7 +65,15 @@ export interface ForecastOkDisplay {
   intervalLevel: 0.8;
   points: ForecastPointDisplay[];
   mealAware: MealAwareDisplay;
-  models: { baseline: string | null; eventLayer: string };
+  models: {
+    baseline: string | null;
+    eventLayer: string;
+    /**
+     * What the stored outcomes say about the event layer: none_yet / supports / against / mixed, with the number of
+     * scored forecasts behind it. Show it next to the adjusted line ("not yet validated" while none_yet).
+     */
+    eventLayerEvidence: { status: 'none_yet' | 'supports' | 'against' | 'mixed'; samples: number };
+  };
   /** Whether this forecast was written to the database (false for what-if views or if saving failed). */
   saved: boolean;
   /** Plain-language limits that apply to this forecast. */
@@ -77,6 +85,12 @@ export interface ForecastBaselineUnavailableDisplay {
   status: 'baseline_unavailable';
   anchor: { measuredAt: string; glucoseMgdl: number; ageMinutes: number };
   reason: string;
+  /**
+   * No glucose line is drawn, but what the person logged is still accounted for: insulin / carbs on board
+   * now and the list of logged events with their role, so a saved meal or dose never looks like it vanished.
+   * Absent only when logged events could not be read.
+   */
+  mealAware?: MealAwareDisplay;
   notes: string[];
   disclaimer: string;
 }

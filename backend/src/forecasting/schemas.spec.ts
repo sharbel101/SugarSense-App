@@ -31,6 +31,13 @@ describe('therapy settings schema (ICR is grams per unit of rapid-acting insulin
     expect(therapySettingsSchema.safeParse({ ...base, icrSegments }).success).toBe(false);
   });
 
+  it('accepts an IANA time zone and rejects anything else', () => {
+    const ok = { ...base, icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }] };
+    expect(therapySettingsSchema.safeParse({ ...ok, timezone: 'Asia/Beirut' }).success).toBe(true);
+    expect(therapySettingsSchema.safeParse({ ...ok, timezone: 'Mars/Olympus' }).success).toBe(false);
+    expect(therapySettingsSchema.safeParse({ ...ok, timezone: '' }).success).toBe(false);
+  });
+
   it('rejects unknown fields, a missing source and an impossible insulin curve', () => {
     const icrSegments = [{ startMinute: 0, gramsPerUnit: 10 }];
     expect(therapySettingsSchema.safeParse({ icrSegments, source: 'user_entered', autoAdjust: true }).success).toBe(false);
@@ -110,10 +117,15 @@ describe('time zones and ratio segments', () => {
       [profile({}), profile({ profileId: 2, version: 2, effectiveFromSec: 5000, icr: [{ startMinute: 0, value: 20 }] })],
       'UTC',
     );
-    expect(r.at(999).icrStatus).toBe('unavailable');
+    // before any version existed, the first one entered is what applies (nothing else was in force)
+    expect(r.at(999)).toMatchObject({ version: 1, icrGPerU: 12 });
     expect(r.at(1000).icrGPerU).toBe(12);
     expect(r.at(4999).version).toBe(1);
     expect(r.at(5000)).toMatchObject({ version: 2, icrGPerU: 20 });
+  });
+
+  it('with no profile at all the ratio is unavailable, never a default', () => {
+    expect(new TherapyResolver([], 'UTC').at(5000)).toMatchObject({ icrStatus: 'unavailable', icrGPerU: null, isfMgdlPerU: null, version: null });
   });
 
   it('a profile without ISF resolves the ratio but not the correction factor (null, not a default)', () => {

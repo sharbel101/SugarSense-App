@@ -74,6 +74,8 @@ export interface EngineParams {
   cS: number;
   /** Extra relative dose uncertainty for doses the user marked uncertain (engineering default). */
   uncertainDoseRel: number;
+  /** Remove from the event increments what the glucose-only model already extrapolates from them. */
+  trendOverlap: boolean;
 }
 
 export type EventRole = 'applied' | 'scenario_only' | 'ignored' | 'excluded';

@@ -1,5 +1,5 @@
 import { insulinCumulativeAction, insulinRemainingFraction, mealCumulativeAbsorption } from './kernels.js';
-import { FAT_PROTEIN, TIME_CLASS_RATIO, UNCERTAIN_INSULIN_TIMING_MIN } from './params.js';
+import { FAT_PROTEIN, TIME_CLASS_RATIO, TREND_SLOPE_WINDOW_MIN, UNCERTAIN_INSULIN_TIMING_MIN, trendResponseAt } from './params.js';
 import type {
   EngineParams,
   EventDisposition,
@@ -59,6 +59,10 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
   const varTiming = zeros(n);
   const varFp = zeros(n);
   const dispositions: EventDisposition[] = [];
+  // Event-driven glucose slope over the last TREND_SLOPE_WINDOW_MIN minutes, from APPLIED events only (mg/dL/min,
+  // unscaled). The glucose-only model already extrapolates part of it, so it is taken back out below.
+  let slopeMeal = 0;
+  let slopeInsulin = 0;
 
   const linkByMeal = new Map(input.links.map((l) => [l.mealId, l]));
   const mealByInsulin = new Map<string, string>();
@@ -114,6 +118,12 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
       }
     }
     if (knownCoverage) {
+      {
+        const tau = params.tauMMin * TIME_CLASS_RATIO[meal.timeClass];
+        slopeMeal +=
+          (csf * (meal.carbsG as number) * (mealCumulativeAbsorption(age0, tau) - mealCumulativeAbsorption(age0 - TREND_SLOPE_WINDOW_MIN, tau))) /
+          TREND_SLOPE_WINDOW_MIN;
+      }
       appliedMeals += 1;
       dispositions.push({ eventType: 'meal', id: meal.id, role: 'applied', reason: `insulin_${status}` });
     } else {
@@ -177,7 +187,12 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
         scenarioDown[j] = (scenarioDown[j] as number) + params.mIsf * inc;
       }
     }
-    if (role === 'applied') appliedInsulin += 1;
+    if (role === 'applied') {
+      slopeInsulin +=
+        (dose.isfMgdlPerU * dose.units * (insulinCumulativeAction(age0, tp, params.tdMin) - insulinCumulativeAction(age0 - TREND_SLOPE_WINDOW_MIN, tp, params.tdMin))) /
+        TREND_SLOPE_WINDOW_MIN;
+      appliedInsulin += 1;
+    }
     dispositions.push({ eventType: 'insulin', id: dose.id, role, reason });
   }
 
@@ -202,6 +217,14 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
   };
   const cobG = cobAt(0);
   const iobU = iobAt(0);
+
+  if (params.trendOverlap) {
+    for (let j = 0; j < n; j += 1) {
+      const k = trendResponseAt(Math.min(minutes[j] as number, 120));
+      mealEffect[j] = (mealEffect[j] as number) - k * slopeMeal;
+      insulinEffect[j] = (insulinEffect[j] as number) - k * slopeInsulin;
+    }
+  }
 
   const series: StepSeries = {
     minutes,

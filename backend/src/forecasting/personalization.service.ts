@@ -21,6 +21,21 @@ export interface UpdateReport {
     | { action: 'proposed' | 'promoted'; reason: string; mCsf: number; mIsf: number; testN: number; maeBaseline: number; maeCurrent: number; maeCandidate: number };
 }
 
+/** How the stored outcomes judge the event layer against the glucose-only baseline (shown, never claimed). */
+export interface LayerEvidence {
+  /**
+   * none_yet = too few scored forecasts with logged events to say anything;
+   * supports = lower error than the baseline at 30, 60 and 120 min; against = higher at all three; mixed = otherwise.
+   */
+  status: 'none_yet' | 'supports' | 'against' | 'mixed';
+  /** Smallest number of scored forecasts behind any of the three horizons. */
+  samples: number;
+}
+
+/** Scored forecasts needed at EACH of 30, 60 and 120 min before any verdict other than none_yet. */
+export const EVIDENCE_MIN_SAMPLES = 30;
+const EVIDENCE_TTL_MS = 5 * 60_000;
+
 export interface HorizonComparison {
   horizonMin: number;
   featureConfig: string;
@@ -43,6 +58,7 @@ export interface HorizonComparison {
 @Injectable()
 export class PersonalizationService {
   private readonly logger = new Logger(PersonalizationService.name);
+  private readonly evidenceCache = new Map<string, { at: number; value: LayerEvidence }>();
 
   constructor(
     @Inject(DbService) private readonly db: DbService,
@@ -156,6 +172,33 @@ export class PersonalizationService {
       maeCurrent: decision.maeCurrent,
       maeCandidate: decision.maeCandidate,
     };
+  }
+
+  /** Verdict of the stored outcomes on the event layer; cached for a few minutes. Never throws. */
+  async layerEvidence(userId: string, nowMs: number = Date.now()): Promise<LayerEvidence> {
+    const hit = this.evidenceCache.get(userId);
+    if (hit && nowMs - hit.at < EVIDENCE_TTL_MS) return hit.value;
+    let value: LayerEvidence = { status: 'none_yet', samples: 0 };
+    try {
+      const rows = await this.compareBaselineVsAdjusted(userId);
+      const per = [30, 60, 120].map((h) => {
+        const r = rows.filter((x) => x.horizonMin === h);
+        const n = r.reduce((a, x) => a + x.n, 0);
+        const mae = (key: 'maeBaseline' | 'maeAdjusted') => (n === 0 ? 0 : r.reduce((a, x) => a + x[key] * x.n, 0) / n);
+        return { n, base: mae('maeBaseline'), adj: mae('maeAdjusted') };
+      });
+      const samples = Math.min(...per.map((x) => x.n));
+      if (samples >= EVIDENCE_MIN_SAMPLES) {
+        const better = per.filter((x) => x.adj < x.base).length;
+        value = { status: better === 3 ? 'supports' : better === 0 ? 'against' : 'mixed', samples };
+      } else {
+        value = { status: 'none_yet', samples };
+      }
+    } catch (err) {
+      this.logger.warn(`evidence not computed ${describeDbError(err)}`);
+    }
+    this.evidenceCache.set(userId, { at: nowMs, value });
+    return value;
   }
 
   /**

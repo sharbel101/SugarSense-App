@@ -21,6 +21,7 @@ import {
   type ForecastEventDisplay,
 } from './forecast-response.js';
 import { ParametersService } from './parameters.service.js';
+import { PersonalizationService } from './personalization.service.js';
 import { PredictionStore, type EventLinkRecord } from './prediction-store.service.js';
 import { TherapyService, type ResolvedTherapy, type TherapyResolver } from './therapy.service.js';
 import { toIso, toSec } from './time.js';
@@ -64,6 +65,7 @@ export class ForecastService {
     @Inject(ParametersService) private readonly parameters: ParametersService,
     @Inject(BaselineErrorService) private readonly baselineError: BaselineErrorService,
     @Inject(PredictionStore) private readonly store: PredictionStore,
+    @Inject(PersonalizationService) private readonly personalization: PersonalizationService,
   ) {}
 
   async run(opts: RunOptions = {}): Promise<ForecastDisplay> {
@@ -74,16 +76,8 @@ export class ForecastService {
 
     const anchorSec = toSec(g.measuredAt);
     const anchor = { measuredAt: g.measuredAt, glucoseMgdl: g.glucoseMgdl, ageMinutes: g.ageMinutes };
-    if (!g.forecastAvailable) {
-      return {
-        status: 'baseline_unavailable',
-        anchor,
-        reason: g.forecastUnavailableReason ?? 'The glucose forecast is not available right now.',
-        notes: ['Nothing is estimated without the glucose forecast, so no meal-aware forecast is shown either.'],
-        disclaimer: FORECAST_DISCLAIMER,
-      };
-    }
-
+    // Without the glucose-only forecast no glucose line is drawn - but what the person logged is still
+    // accounted for (insulin / carbs on board), so a logged meal or dose never seems to have vanished.
     const baseline = g.predictions
       .map((p) => ({ minutes: Math.round((toSec(p.time) - anchorSec) / 60), value: p.value }))
       .filter((p) => p.minutes >= STEP_MIN && p.minutes <= BASELINE_HORIZON_MIN && p.minutes % STEP_MIN === 0);
@@ -158,6 +152,50 @@ export class ForecastService {
     const { layer, points } = computeRun(inputs);
     const allDispositions = [...layer.dispositions, ...built.extraDispositions];
 
+    const timeOf = (e: EventDisposition): number =>
+      e.eventType === 'meal'
+        ? ((mealRows.find((m) => m.mealId === e.id)?.eatenAtSec) ?? anchorSec)
+        : ((insulinRows.find((i) => i.insulinId === e.id)?.administeredAtSec) ?? anchorSec);
+    const eventDisplay: ForecastEventDisplay[] = allDispositions.map((d) => ({
+      id: d.id,
+      type: d.eventType,
+      time: toIso(timeOf(d)),
+      role: ROLE_DISPLAY[d.role],
+      reason: d.reason,
+    }));
+    const count = (type: 'meal' | 'insulin', role: EventDisposition['role']): number =>
+      allDispositions.filter((d) => d.eventType === type && d.role === role).length;
+    const availabilityView = {
+      mealsUsed: count('meal', 'applied'),
+      mealsRangeOnly: count('meal', 'scenario_only'),
+      mealsNotUsed: count('meal', 'ignored'),
+      insulin: built.insulinHistory,
+      insulinDosesUsed: count('insulin', 'applied'),
+      insulinDosesRangeOnly: count('insulin', 'scenario_only'),
+      insulinOnBoardUnits: layer.iobU === null ? null : Math.round(layer.iobU * 100) / 100,
+      carbsOnBoardGrams: layer.cobG === null ? null : Math.round(layer.cobG * 10) / 10,
+      therapySettings: (atAnchor.icrStatus === 'available' && atAnchor.isfMgdlPerU !== null ? 'available' : 'unavailable') as 'available' | 'unavailable',
+    };
+
+    if (!g.forecastAvailable) {
+      notes.push('Nothing is estimated without the glucose forecast, so no glucose line is drawn for your logged meals and insulin yet. They are saved and will be used as soon as it is back.');
+      notes.push(...buildNotes({ layer, allDispositions, atAnchor, points: [], counterfactual, built, eventsLoaded: eventsLoaded || !this.db.available, baselineSigmaExtrapolated: true }));
+      return {
+        status: 'baseline_unavailable',
+        anchor,
+        reason: g.forecastUnavailableReason ?? 'The glucose forecast is not available right now.',
+        mealAware: {
+          changedForecast: false,
+          counterfactual,
+          excludedMealIds: excludeMealIds.filter((id) => mealRows.some((m) => m.mealId === id)),
+          availability: availabilityView,
+          events: eventDisplay,
+        },
+        notes: [...new Set(notes)],
+        disclaimer: FORECAST_DISCLAIMER,
+      };
+    }
+
     // ---- save before the outcome is known ---------------------------------------------------------
     let saved = false;
     if (eventsLoaded && userId && opts.persist !== false && !counterfactual) {
@@ -186,19 +224,6 @@ export class ForecastService {
 
     notes.push(...buildNotes({ layer, allDispositions, atAnchor, points, counterfactual, built, eventsLoaded: eventsLoaded || !this.db.available, baselineSigmaExtrapolated: true }));
 
-    const timeOf = (e: EventDisposition): number =>
-      e.eventType === 'meal'
-        ? ((mealRows.find((m) => m.mealId === e.id)?.eatenAtSec) ?? anchorSec)
-        : ((insulinRows.find((i) => i.insulinId === e.id)?.administeredAtSec) ?? anchorSec);
-    const eventDisplay: ForecastEventDisplay[] = allDispositions.map((d) => ({
-      id: d.id,
-      type: d.eventType,
-      time: toIso(timeOf(d)),
-      role: ROLE_DISPLAY[d.role],
-      reason: d.reason,
-    }));
-    const count = (type: 'meal' | 'insulin', role: EventDisposition['role']): number =>
-      allDispositions.filter((d) => d.eventType === type && d.role === role).length;
     const changed = points.some((p) => Math.abs(p.adjusted - (p.baseline ?? p.adjusted)) >= 0.05);
 
     return {
@@ -213,20 +238,14 @@ export class ForecastService {
         changedForecast: changed,
         counterfactual,
         excludedMealIds: excludeMealIds.filter((id) => mealRows.some((m) => m.mealId === id)),
-        availability: {
-          mealsUsed: count('meal', 'applied'),
-          mealsRangeOnly: count('meal', 'scenario_only'),
-          mealsNotUsed: count('meal', 'ignored'),
-          insulin: built.insulinHistory,
-          insulinDosesUsed: count('insulin', 'applied'),
-          insulinDosesRangeOnly: count('insulin', 'scenario_only'),
-          insulinOnBoardUnits: layer.iobU === null ? null : Math.round(layer.iobU * 100) / 100,
-          carbsOnBoardGrams: layer.cobG === null ? null : Math.round(layer.cobG * 10) / 10,
-          therapySettings: atAnchor.icrStatus === 'available' && atAnchor.isfMgdlPerU !== null ? 'available' : 'unavailable',
-        },
+        availability: availabilityView,
         events: eventDisplay,
       },
-      models: { baseline: g.modelVersion, eventLayer: ENGINE_LAYER_VERSION },
+      models: {
+        baseline: g.modelVersion,
+        eventLayer: ENGINE_LAYER_VERSION,
+        eventLayerEvidence: eventsLoaded && userId ? await this.personalization.layerEvidence(userId) : { status: 'none_yet', samples: 0 },
+      },
       saved,
       notes: [...new Set(notes)],
       disclaimer: FORECAST_DISCLAIMER,
@@ -237,7 +256,8 @@ export class ForecastService {
   async mealCoverage(mealId: string): Promise<MealCoverageView | null> {
     const user = await this.users.primary();
     const meal = await this.events.mealById(user.userId, mealId);
-    if (!meal) return null;
+    // a cancelled meal is withdrawn from the history: there is nothing to compare
+    if (!meal || meal.status === 'cancelled') return null;
     const resolver = await this.therapy.resolver(user.userId, user.timezone);
     const insulin = await this.events.insulinBetween(user.userId, meal.eatenAtSec - 3600, meal.eatenAtSec + 3600);
     const meals = await this.events.mealsBetween(user.userId, meal.eatenAtSec - 3600, meal.eatenAtSec + 3600);
@@ -245,7 +265,8 @@ export class ForecastService {
       meals.map((m) => ({ id: m.mealId, tSec: m.eatenAtSec })),
       insulin.map(toLinkable),
     );
-    const link = links.find((l) => l.mealId === mealId) as MealLink;
+    const link = links.find((l) => l.mealId === mealId);
+    if (!link) return null;
     const t = resolver.at(meal.eatenAtSec);
     const coverage = carbCoverage(meal.carbsG, link.unitsTotal, t.icrGPerU);
     return {

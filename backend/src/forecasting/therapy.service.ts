@@ -44,7 +44,8 @@ const segmentValueAt = (segments: Segment[], minuteOfDay: number): number | null
 
 /**
  * Resolves the setting that applied at a given instant: the newest version whose effective date is not
- * after that instant, then the segment covering the local time of day. A missing value stays null -
+ * after that instant (or, before any version existed, the first one entered), then the segment covering the local
+ * time of day. A missing value stays null -
  * there is no default ratio anywhere in this class.
  */
 export class TherapyResolver {
@@ -64,6 +65,14 @@ export class TherapyResolver {
       ) {
         chosen = p;
       }
+    }
+    // The FIRST settings a person enters describe how they have been treating all along: nothing else was in force
+    // before them, so they apply to earlier entries too (otherwise a meal logged a minute before the first save
+    // would silently be left out). Later versions only apply from their own effective date.
+    if (chosen === null && this.profiles.length > 0) {
+      chosen = this.profiles.reduce((a, b) =>
+        b.effectiveFromSec < a.effectiveFromSec || (b.effectiveFromSec === a.effectiveFromSec && b.version < a.version) ? b : a,
+      );
     }
     if (chosen === null) {
       return {

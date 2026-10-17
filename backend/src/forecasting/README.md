@@ -1,6 +1,9 @@
 # Meal-aware forecasting layer (backend)
 
-Status 2026-10-16: implemented, tested against PostgreSQL on the VM, **not deployed** (see "Going live").
+Status 2026-10-17: implemented and tested against PostgreSQL on the VM. The first version (up to commit `f95dfbd`) is deployed
+on the production backend with `DATABASE_URL` set. The follow-up fixes from the simulated-usage test (trend-overlap correction,
+race-safe event writes, `Cache-Control: no-store`, settings time zone, first-profile fallback, evidence label, honest
+unavailable notes) are committed locally but **not yet pushed or deployed** (see "Going live").
 Design source: `backend/docs/research/glucose-forecasting-engine-spec.md` (a proposal; its own caveats stand:
 no published validation of this kind of forecaster at 180 minutes, accuracy unknown until it runs on real data).
 Safety rules: root `CLAUDE.md` section 2. This layer forecasts glucose. It never produces, suggests or
@@ -32,10 +35,18 @@ adjusted(h) = baseline(h) + m_csf * CSF * C * [F(age+h) - F(age)]  -  m_isf * IS
   difference between `F` and `A` is the physiology the layer reproduces. There is no fixed ICR penalty.
 * Increments start at the anchor: the part of an event's effect that already happened is in the CGM history and is
   not added again (spec "anchored simulator": `y(t0) + m(t0+h) - m(t0)`).
-* **Overlap risk, stated honestly:** the GRU extrapolates the recent trend, so for a meal that is already pushing
-  glucose up the GRU and the layer can both express part of the same rise. Mitigations: the 80% band always contains
+* **Overlap risk and the trend correction:** the GRU extrapolates the recent trend, so for a meal that is already pushing
+  glucose up the GRU and the layer would both express part of the same rise. The layer therefore subtracts what the GRU
+  has already extrapolated from the *event-driven* glucose movement: `k_h x (event-driven slope over the last 15 min)`,
+  where `k_h` (minutes) is how strongly the deployed GRU continues a slope at horizon `h`. The table
+  `BASELINE_TREND_RESPONSE_MIN` (`src/engine/params.ts`) was measured by least squares on 5,171 stored real predictions of the
+  deployed model (about 2 min at +5, about 7 min at +45...60, about 4 min at +120); it is a property of that model and must be
+  re-measured if the model is replaced. Switch: `EngineParams.trendOverlap`. Further mitigations: the 80% band always contains
   the glucose-only value; both predictions are stored and scored side by side; the learned scale `m_csf` absorbs a
-  systematic overlap. Whether the layer helps on real data is **not yet measured**.
+  systematic remainder. In a synthetic test world the corrected layer helped at 15-60 min for meal + insulin and did **not**
+  help at 120 min or for meal-only entries. Whether it helps on real data is **not yet measured**: every forecast carries
+  `models.eventLayerEvidence` (`none_yet` / `supports` / `against` / `mixed` plus the number of scored forecasts; a verdict needs at
+  least 30 scored forecasts at each of 30, 60 and 120 min) so the screen can say "not yet validated".
 * Fat/protein: delayed second component with amplitude `alpha = 0` (spec: population value is not a mean shift);
   they only widen the late interval. Glycemic index is stored but never used as a multiplier (spec section 4).
 * Horizon: 36 steps of 5 min = 180 min. Beyond 120 min the GRU has no forecast: the baseline is held at its
@@ -58,11 +69,13 @@ adjusted(h) = baseline(h) + m_csf * CSF * C * [F(age+h) - F(age)]  -  m_isf * IS
 | Planned dose | Never counted until recorded as taken (`confirmation: planned` cannot hold an administered amount) |
 | Basal, long/short/other insulin | Never used as a meal bolus |
 | ICR or ISF not set | Meals ignored (`therapy_settings_missing`), glucose-only forecast, note says so. **No default ratio** |
+| Entry older than the first saved settings | The first settings a person saves are taken to describe how they have been treating all along, so they apply to earlier entries too (later versions apply from their own date) |
 | Carbs unknown | Meal kept but ignored; a dose linked to it cannot lower the mean |
 | Uncertain meal/dose timing | Timing term widens the band |
 | Database down / not configured | Glucose-only forecast, `saved: false`, fixed explanatory note; write routes answer 503 with a fixed message |
 | Glucose stale/unavailable | Passed through; no forecast is produced |
-| Forecast model unavailable | `baseline_unavailable`; nothing is extrapolated |
+| Forecast model unavailable | `baseline_unavailable`; nothing is extrapolated. The answer still carries `mealAware` (events, coverage, on-board estimates) so the screen can show what was logged, and the note says plainly that no forecast line exists |
+| Glucose stale | `stale` with a fixed message; no number and no forecast |
 
 Carbohydrate coverage (`GET /events/meals/:id/coverage`, and stored with each run): `units x ICR` versus the recorded
 carbohydrate. It is an analysis feature. It explains history; it is not a dose suggestion and nothing in the wording
@@ -80,11 +93,15 @@ tells anyone to take insulin.
 | `POST /events/insulin`, `PATCH /events/insulin/:id` | Insulin entry. `confirmation`: `confirmed` (taken), `uncertain` (taken, approximate), `planned` (not taken yet). `PATCH {status:"cancelled"}` withdraws a mistaken entry: kept with its revision history, no longer acts in forecasts, no longer counts as "insulin recorded", not listed again |
 | `GET /events/meals/:id/coverage` | Carbohydrate vs insulin coverage under the ratio that applied at that meal |
 | `GET /events/recent?hours=` | Recent meals/insulin for a picker |
-| `GET /therapy/settings`, `GET /therapy/settings/history`, `PUT /therapy/settings` | ICR (g per unit) and ISF (mg/dL per unit) by time of day, versioned |
+| `GET /therapy/settings`, `GET /therapy/settings/history`, `PUT /therapy/settings` | ICR (g per unit) and ISF (mg/dL per unit) by time of day, versioned. `PUT` also accepts `timezone` (IANA name, e.g. `Asia/Beirut`): the local clock the time-of-day segments are read in |
 | `POST /meals/analyze` (existing) | Unchanged fields + `mealEventId`, `forecast`, `forecastNote` (also on failure variants) |
 
 `clientId` is any id of 8-80 characters `[A-Za-z0-9._-]` (the app's own event id works); resending it never creates a
-second event. Every write response carries the refreshed `forecast` (or `null` when nothing changed).
+second event, including when the same request arrives twice at the same moment (the database decides, not a check-then-insert).
+Every write response carries the refreshed `forecast` (or `null` when nothing changed).
+
+Forecast, glucose, event, therapy and meal-analysis responses are sent with `Cache-Control: no-store`, so a browser or proxy
+never shows a stale glucose number or forecast.
 
 Every forecast point also carries `insulinOnBoardUnits` and `carbsOnBoardGrams` (estimates from logged entries only, run down with the same
 kernels as the effects, `null` = unknown, `0` insulin only after an explicit "none taken"), so the graph can draw how they fall. The
@@ -116,16 +133,16 @@ the glucose-only baseline on later data. Otherwise it is stored as `proposed`. E
 version. Only runs where every logged event is trustworthy are used (known carbohydrates, settings present, insulin
 relationship known, timing within 15 min, no uncertain doses). The prescribed ICR/ISF are **never** changed by this.
 
-## Going live (nothing below has been done on the production service)
+## Going live
 
-1. `0006` and `0007` are already applied to the production database (additive, backups taken first). The web-app nginx site
-   (`/etc/nginx/sites-available/sugarsense-web`, port 8090) now also proxies `/forecast`, `/events` and `/therapy` to the backend
-   (backup `sugarsense-web.bak-20261016-185745`); the ngrok gateway already forwards everything else.
-2. Push `main`; the deploy timer builds and restarts the backend (its tests skip the database suite because no test
-   database is configured there).
-3. Add `DATABASE_URL` (value from `~/sugarsense-db.env`) to `~/sugarsense-app/backend/.env`, optionally `PRIMARY_USER_ID`,
-   then `sudo systemctl restart sugarsense-backend`. Until then the new routes answer 503 and `/forecast` is glucose-only.
-4. Tell the UI chat about the contract above (`MASTER-PROMPT-UI-FORECAST-INTEGRATION.md`).
+Done on the production service (2026-10-16): `0006` and `0007` applied to the production database (additive, backups taken
+first); the web-app nginx site (`/etc/nginx/sites-available/sugarsense-web`, port 8090) proxies `/forecast`, `/events` and
+`/therapy` to the backend (backup `sugarsense-web.bak-20261016-185745`); `DATABASE_URL` is set in the backend's `.env`; the
+backend runs the first version (`f95dfbd`).
+
+Still to do for the follow-up fixes: push `main` (the deploy timer builds and restarts the backend in about 3-5 minutes; its
+tests skip the database suite because no test database is configured there). No migration is needed and no `.env` change.
+The front-end contract is in `MASTER-PROMPT-UI-FORECAST-INTEGRATION.md`.
 
 ## Tests
 
@@ -136,7 +153,8 @@ relationship known, timing within 15 min, no uncertain doses). The prescribed IC
 
 ## Known limits
 
-No Kalman filter yet (the spec's online residual correction); the baseline's trend overlap is mitigated, not removed;
+No Kalman filter yet (the spec's online residual correction); the baseline's trend overlap is corrected with a measured
+table, which is an approximation (the layer was not better than the glucose-only line at 120 min in synthetic tests);
 the 60-120 min baseline error is extrapolated from 5-60 min measurements; exercise and sleep are not used; fat/protein
 amplitudes are not learned; photo-time timing uncertainty (10 min) and the dose-uncertainty factor (50%) are engineering
 defaults; one user, no authentication; meal edits change totals, not individual items.

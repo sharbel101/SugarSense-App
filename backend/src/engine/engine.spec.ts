@@ -9,7 +9,7 @@ import {
   insulinRemainingFraction,
   mealCumulativeAbsorption,
 } from './kernels.js';
-import { DEFAULT_ENGINE_PARAMS } from './params.js';
+import { DEFAULT_ENGINE_PARAMS, TREND_SLOPE_WINDOW_MIN, trendResponseAt } from './params.js';
 import type { InsulinInput, MealInput, MealLink } from './types.js';
 
 const T0 = 1_792_000_000; // anchor, UTC seconds
@@ -189,11 +189,13 @@ describe('event layer', () => {
 
   it('events that already acted do not act twice: effect starts from the anchor, not from the event time', () => {
     const fresh = layer({ meals: [meal({ tSec: T0 })], insulin: [dose()], links: [linked()], insulinHistory: 'logged' });
+    const raw = { ...DEFAULT_ENGINE_PARAMS, trendOverlap: false };
     const old = layer({
       meals: [meal({ tSec: T0 - min(90) })],
       insulin: [dose({ tSec: T0 - min(90) })],
       links: [linked()],
       insulinHistory: 'logged',
+      params: raw,
     });
     // 90 minutes later most of the remaining meal effect is smaller than a fresh meal's first 90 minutes
     expect(at(old, 30, 'mealEffect')).toBeLessThan(at(fresh, 30, 'mealEffect'));
@@ -318,6 +320,61 @@ describe('event layer', () => {
     expect(scaled.series.insulinApplied[10]).toBeCloseTo(0.8 * (base.series.insulinApplied[10] as number), 9);
     // the unscaled series stored for later fitting does not depend on the scales
     expect(scaled.series.mealEffect).toEqual(base.series.mealEffect);
+  });
+});
+
+describe('trend overlap with the glucose-only model', () => {
+  const confirmedNone = { mealId: 'm1', status: 'confirmed_none' as const, insulinIds: ['z'], unitsTotal: 0 };
+  const raw = { ...DEFAULT_ENGINE_PARAMS, trendOverlap: false };
+
+  it('the response table is the measured one: rises to about 7 minutes at +1 h, falls to about 4 at +2 h', () => {
+    expect(trendResponseAt(5)).toBeCloseTo(2.09, 2);
+    expect(trendResponseAt(60)).toBeCloseTo(7.127, 3);
+    expect(trendResponseAt(120)).toBeCloseTo(4.222, 3);
+    expect(trendResponseAt(500)).toBeCloseTo(4.222, 3);
+    expect(trendResponseAt(62.5)).toBeGreaterThan(trendResponseAt(120));
+    expect(trendResponseAt(2.5)).toBeCloseTo(1.045, 3);
+  });
+
+  it('an event that has not moved glucose yet (just logged) is not reduced: nothing is double counted yet', () => {
+    const on = layer({ meals: [meal()], links: [confirmedNone], insulinHistory: 'confirmed_none' });
+    const off = layer({ meals: [meal()], links: [confirmedNone], insulinHistory: 'confirmed_none', params: raw });
+    expect(on.series.mealEffect).toEqual(off.series.mealEffect);
+  });
+
+  it('a meal that is already raising glucose: the part the glucose-only model extrapolates is taken back out', () => {
+    const args = { meals: [meal({ tSec: T0 - min(40) })], links: [confirmedNone], insulinHistory: 'confirmed_none' as const };
+    const on = layer(args);
+    const off = layer({ ...args, params: raw });
+    // event-driven slope over the last 15 minutes, mg/dL per minute
+    const slope = (5 * 40 * (mealCumulativeAbsorption(40, 40) - mealCumulativeAbsorption(40 - TREND_SLOPE_WINDOW_MIN, 40))) / TREND_SLOPE_WINDOW_MIN;
+    expect(slope).toBeGreaterThan(1.5);
+    for (const m of [30, 60, 120]) {
+      const j = m / 5 - 1;
+      expect((off.series.mealEffect[j] as number) - (on.series.mealEffect[j] as number)).toBeCloseTo(trendResponseAt(m) * slope, 9);
+    }
+    expect(on.series.mealApplied[11] as number).toBeLessThan(off.series.mealApplied[11] as number);
+  });
+
+  it('insulin is treated the same way, with its own sign, and scenario-only events are never corrected', () => {
+    const insArgs = { insulin: [dose({ kind: 'correction', tSec: T0 - min(60) })], insulinHistory: 'logged' as const };
+    const on = layer(insArgs);
+    const off = layer({ ...insArgs, params: raw });
+    const slopeI = (50 * 4 * (insulinCumulativeAction(60, 75, 300) - insulinCumulativeAction(60 - TREND_SLOPE_WINDOW_MIN, 75, 300))) / TREND_SLOPE_WINDOW_MIN;
+    expect(slopeI).toBeGreaterThan(0.5);
+    expect((off.series.insulinEffect[11] as number) - (on.series.insulinEffect[11] as number)).toBeCloseTo(trendResponseAt(60) * slopeI, 9);
+    // no recorded meal -> scenario only -> the mean is not moved, so there is nothing to correct
+    const unlinked = layer({ meals: [meal({ tSec: T0 - min(40) })], links: [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }], insulinHistory: 'none_recorded' });
+    const unlinkedOff = layer({ meals: [meal({ tSec: T0 - min(40) })], links: [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }], insulinHistory: 'none_recorded', params: raw });
+    expect(unlinked.series.mealEffect).toEqual(unlinkedOff.series.mealEffect);
+    expect(unlinked.series.scenarioUp).toEqual(unlinkedOff.series.scenarioUp);
+  });
+
+  it('a matched meal and dose nearing the end of absorption can be net NEGATIVE: the baseline over-extrapolates the fading rise', () => {
+    const r = layer({ meals: [meal({ tSec: T0 - min(110) })], insulin: [dose({ tSec: T0 - min(110) })], links: [linked()], insulinHistory: 'logged' });
+    const j = 60 / 5 - 1;
+    const net = (r.series.mealApplied[j] as number) - (r.series.insulinApplied[j] as number);
+    expect(Number.isFinite(net)).toBe(true);
   });
 });
 

@@ -110,6 +110,36 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ unitsAdministered: 2 }).expect(422);
   });
 
+  it('time zone: saved with the settings, validated, returned, and used to read the time-of-day ratios', async () => {
+    const http = request(app.getHttpServer());
+    await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], timezone: 'Mars/Olympus' }).expect(400);
+    const saved = await http
+      .put('/therapy/settings')
+      .send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 12 }, { startMinute: 720, gramsPerUnit: 8 }], isfSegments: [{ startMinute: 0, mgdlPerUnit: 50 }], timezone: 'Asia/Kolkata', effectiveFrom: iso(nowSec() - 3 * 86400) })
+      .expect(200);
+    expect(saved.body.timezone).toBe('Asia/Kolkata');
+    const got = await http.get('/therapy/settings').expect(200);
+    expect(got.body.timezone).toBe('Asia/Kolkata');
+    // a meal logged at 14:30 India time (09:00 UTC) must be read with the afternoon ratio (8 g/U), not the morning one
+    const day = Math.floor(nowSec() / 86400) * 86400 - 86400;
+    const m = await http.post('/events/meals').send({ clientId: 'tz-meal-000001', eatenAt: iso(day + 9 * 3600), carbsG: 40 }).expect(201);
+    await http.post('/events/insulin').send({ clientId: 'tz-dose-000001', administeredAt: iso(day + 9 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual', mealId: m.body.meal.id }).expect(201);
+    const cov = await http.get(`/events/meals/${m.body.meal.id}/coverage`).expect(200);
+    expect(cov.body.expectedCoverageG).toBe(16); // 2 U x 8 g/U
+  });
+
+  it('responses are never cacheable and a cancelled meal has no coverage to show', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    for (const path of ['/forecast', '/events/recent', '/therapy/settings']) {
+      const r = await http.get(path).expect(200);
+      expect(r.headers['cache-control']).toContain('no-store');
+    }
+    const m = await http.post('/events/meals').send({ clientId: 'cc-meal-000001', eatenAt: iso(nowSec() - 600), carbsG: 20 }).expect(201);
+    await http.patch(`/events/meals/${m.body.meal.id}`).send({ status: 'cancelled' }).expect(200);
+    await http.get(`/events/meals/${m.body.meal.id}/coverage`).expect(404);
+  });
+
   it('GET /forecast and the what-if route', async () => {
     await setTestTherapy(rig);
     const http = request(app.getHttpServer());

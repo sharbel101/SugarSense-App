@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { mealCumulativeAbsorption } from '../engine/kernels.js';
+import { TREND_SLOPE_WINDOW_MIN, trendResponseAt } from '../engine/params.js';
+import { forecastNoteFor } from './meal-forecast-flow.js';
 import { MealsService } from '../meals/meals.service.js';
 import { FakeMealVisionProvider } from '../meals/providers/fake-meal-vision.provider.js';
 import {
@@ -117,6 +119,42 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const f = await rig.forecast.run();
       expect(f.status).toBe('baseline_unavailable');
       expect('points' in f).toBe(false);
+    });
+
+    it('with the glucose forecast unavailable, logged meals and insulin are still accounted for (on board), no line is drawn', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      await rig.api.addMeal({ clientId: 'gap-meal-0001', eatenAt: iso(nowSec() - 600), carbsG: 60 });
+      await rig.api.addInsulin({ clientId: 'gap-dose-0001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual' });
+      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, predictions: [], forecastUnavailableReason: 'fewer than 12 suitable glucose readings to run the forecast' });
+      const f = (await rig.forecast.run()) as unknown as {
+        status: string; reason: string; points?: unknown; notes: string[];
+        mealAware?: { availability: { mealsUsed: number; insulinOnBoardUnits: number | null; carbsOnBoardGrams: number | null; insulin: string }; events: { type: string; role: string }[] };
+      };
+      expect(f.status).toBe('baseline_unavailable');
+      expect(f.points).toBeUndefined();
+      expect(f.reason).toMatch(/fewer than 12/);
+      expect(f.mealAware!.availability.insulinOnBoardUnits).toBeGreaterThan(4); // 6 U logged 10 minutes ago
+      expect(f.mealAware!.availability.carbsOnBoardGrams).toBeGreaterThan(40);
+      expect(f.mealAware!.availability.insulin).toBe('logged');
+      expect(f.mealAware!.events.map((e) => e.role).sort()).toEqual(['used', 'used']);
+      expect(f.notes.join(' ')).toMatch(/saved and will be used as soon as it is back/);
+      // nothing is saved as a forecast when there is none
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId])).toBeGreaterThanOrEqual(0);
+    });
+
+    it('the note that comes back with a photo meal never claims a forecast that does not exist', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, predictions: [], forecastUnavailableReason: 'gap' });
+      const res = await mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]).analyzeMeal(photo);
+      expect(res.status).toBe('ok');
+      expect(res.forecast?.status).toBe('baseline_unavailable');
+      expect(res.forecastNote).toMatch(/meal is saved/i);
+      expect(res.forecastNote).not.toMatch(/Forecast includes this meal/);
+      expect(forecastNoteFor(null)).toMatch(/could not be refreshed/);
+      expect(forecastNoteFor({ status: 'stale', reason: 'x', lastMeasuredAt: null })).toMatch(/too old/);
+      expect(forecastNoteFor({ status: 'unavailable', reason: 'x' })).toMatch(/not available/);
     });
 
     it('passes stale and unavailable glucose through untouched', async () => {
@@ -259,8 +297,11 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(at(a, 60).adjusted - 130).toBeGreaterThan(at(b, 60).adjusted - 130);
       // and exactly the kernel increment: F(age+h) - F(age), not F(h)
       const csf = 5;
-      const expected = csf * 40 * (mealCumulativeAbsorption(150 - 2 + 60, 40) - mealCumulativeAbsorption(150 - 2, 40));
-      expect(at(b, 60).adjusted - 130).toBeCloseTo(expected, 0);
+      const age = 150 - 2;
+      const increment = csf * 40 * (mealCumulativeAbsorption(age + 60, 40) - mealCumulativeAbsorption(age, 40));
+      const slope = (csf * 40 * (mealCumulativeAbsorption(age, 40) - mealCumulativeAbsorption(age - TREND_SLOPE_WINDOW_MIN, 40))) / TREND_SLOPE_WINDOW_MIN;
+      // what the glucose-only model already extrapolates from the meal-driven slope is taken back out
+      expect(at(b, 60).adjusted - 130).toBeCloseTo(increment - trendResponseAt(60) * slope, 0);
     });
 
     it('active insulin is unknown with nothing recorded, zero only when confirmed, computed when logged', async () => {
@@ -352,6 +393,33 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const forced = await rig.api.addMeal({ clientId: 'dup-test-0003', eatenAt: iso(nowSec() - 640), carbsG: 35, allowDuplicate: true });
       expect(forced.result).toBe('created');
       expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(2);
+    });
+
+    it('parallel identical requests (a retry storm) create exactly one entry and never an error', async () => {
+      const rig = makeRig();
+      const meal = { clientId: 'race-meal-0001', eatenAt: iso(nowSec() - 600), carbsG: 18 };
+      const m = await Promise.all(Array.from({ length: 12 }, () => rig.api.addMeal(meal)));
+      expect(m.filter((r) => r.result === 'created')).toHaveLength(1);
+      expect(m.every((r) => r.result === 'created' || r.result === 'exists')).toBe(true);
+      expect(new Set(m.map((r) => r.meal!.id)).size).toBe(1);
+      const dose = { clientId: 'race-dose-0001', administeredAt: iso(nowSec() - 600), kind: 'correction' as const, confirmation: 'confirmed' as const, unitsAdministered: 1, source: 'manual' as const };
+      const d = await Promise.all(Array.from({ length: 12 }, () => rig.api.addInsulin(dose)));
+      expect(d.filter((r) => r.result === 'created')).toHaveLength(1);
+      expect(d.every((r) => r.result === 'created' || r.result === 'exists')).toBe(true);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM insulin_events WHERE user_id = $1', [rig.userId])).toBe(1);
+    });
+
+    it('parallel photo uploads of one photo id map to one meal event', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      const svc = mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]);
+      const body = { ...photo, clientId: 'race-photo-0001' };
+      const res = await Promise.all(Array.from({ length: 6 }, () => svc.analyzeMeal(body)));
+      const ids = new Set(res.map((r) => (r as { mealEventId: string | null }).mealEventId));
+      expect(ids.size).toBe(1);
+      expect([...ids][0]).toEqual(expect.any(String));
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_items i JOIN meal_events m USING (meal_id) WHERE m.user_id = $1', [rig.userId])).toBe(1);
     });
 
     it('a late-arriving event is replayed into a new run; the earlier run stays as it was', async () => {
@@ -630,8 +698,8 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(resolver.at(day + 3 * 3600).icrGPerU).toBe(12); // 08:30 local -> morning segment
       expect(resolver.at(day + 6 * 3600 + 29 * 60).icrGPerU).toBe(12); // 11:59 local
       expect(resolver.at(day + 6 * 3600 + 30 * 60).icrGPerU).toBe(8); // 12:00 local: boundary
-      // before any version existed: unavailable, null, not a default
-      expect(resolver.at(nowSec() - 30 * 86400)).toMatchObject({ icrStatus: 'unavailable', icrGPerU: null, isfMgdlPerU: null });
+      // before the first version existed, that first version is what applied (nothing else was in force)
+      expect(resolver.at(nowSec() - 30 * 86400)).toMatchObject({ version: 1, icrStatus: 'available' });
     });
 
     it("1. different users' ratios are respected independently, 3. same events give different forecasts", async () => {
@@ -759,6 +827,17 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(f.mealAware.events.filter((e) => e.type === 'insulin').map((e) => e.reason).sort()).toEqual(['dose_without_recorded_meal', 'not_a_meal_bolus', 'not_rapid_acting']);
     });
 
+    it('a meal logged a minute BEFORE the first settings were saved is still read with them', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      const meal = await rig.api.addMeal({ clientId: 'first-profile-01', eatenAt: iso(nowSec() - 120), carbsG: 50 });
+      expect(ok(meal.forecast).mealAware.availability.therapySettings).toBe('unavailable');
+      await rig.therapy.setSettings(rig.userId, { icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], isfSegments: [{ startMinute: 0, mgdlPerUnit: 50 }], source: 'user_entered' });
+      const f = ok(await rig.forecast.run());
+      expect(f.mealAware.availability.therapySettings).toBe('available');
+      expect(f.mealAware.events[0]).toMatchObject({ type: 'meal', role: 'range_only', reason: 'insulin_not_recorded' });
+      expect((await rig.forecast.mealCoverage(meal.meal!.id))!.ratioStatus).toBe('available');
+    });
+
     it('7. the ratio is not counted twice: the glucose-only input is identical whatever the ratio', async () => {
       const a = makeRig({ glucose: 130, baseline: (m) => 130 + m / 5 });
       const b = makeRig({ glucose: 130, baseline: (m) => 130 + m / 5 });
@@ -871,7 +950,20 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
         return rig;
       }
 
-      it('13. compares meal-aware and glucose-only predictions on stored history', async () => {
+      it('the forecast says how much evidence there is for the event layer (none yet with a handful of scored forecasts)', async () => {
+      const rig = await build(true);
+      const ev = await rig.personalization.layerEvidence(rig.userId, Date.now() + 10 * 60_000);
+      expect(ev.status).toBe('none_yet');
+      expect(ev.samples).toBeGreaterThan(0);
+      expect(ev.samples).toBeLessThan(30);
+      rig.fake.response = okGlucose(nowSec() - 120, 130, () => 130);
+      const f = ok(await rig.forecast.run());
+      expect(f.models.eventLayerEvidence.status).toBe('none_yet');
+      const fresh = makeRig({ glucose: 130, baseline: () => 130 });
+      expect(ok(await fresh.forecast.run()).models.eventLayerEvidence).toEqual({ status: 'none_yet', samples: 0 });
+    });
+
+    it('13. compares meal-aware and glucose-only predictions on stored history', async () => {
         const rig = await build(true);
         const cmp = await rig.personalization.compareBaselineVsAdjusted(rig.userId);
         const h60 = cmp.find((c) => c.horizonMin === 60)!;

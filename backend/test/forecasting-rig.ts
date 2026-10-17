@@ -138,7 +138,7 @@ export function makeRig(opts: { url?: string; anchorSec?: number; glucose?: numb
   const ingest = new GlucoseIngestService(db, users, personalization);
   const anchor = opts.anchorSec ?? nowSec() - 120;
   const fake = new FakeGlucose(okGlucose(anchor, opts.glucose ?? 120, opts.baseline ?? (() => opts.glucose ?? 120)));
-  const forecast = new ForecastService(fake as unknown as GlucoseService, db, users, therapy, events, parameters, baselineError, store);
+  const forecast = new ForecastService(fake as unknown as GlucoseService, db, users, therapy, events, parameters, baselineError, store, personalization);
   const api = new EventsApiService(events, forecast, users, db);
   const flow = new MealForecastFlow(db, users, events, forecast);
   return { db, userId, fake, users, therapy, events, parameters, store, outcomes, personalization, ingest, forecast, api, flow, baselineError };

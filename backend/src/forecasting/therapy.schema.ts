@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidTimeZone } from './time.js';
 
 /**
  * Request body for PUT /therapy/settings. Units are spelled out in the field names so nothing is
@@ -44,6 +45,8 @@ export const therapySettingsSchema = z
     /** When the setting starts to apply. Default: now. Not more than 24 h in the future. */
     effectiveFrom: z.iso.datetime({ offset: true }).optional(),
     note: z.string().trim().max(500).optional(),
+    /** IANA zone the time-of-day segments are read in, e.g. "Asia/Beirut". The app should send the phone's zone. */
+    timezone: z.string().min(1).max(64).refine(isValidTimeZone, 'not a valid IANA time zone').optional(),
   })
   .strict()
   .refine((v) => v.insulinPeakMin === undefined || v.insulinDurationMin === undefined || v.insulinPeakMin < v.insulinDurationMin / 2, {

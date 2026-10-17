@@ -182,8 +182,9 @@ export class EventsService {
             WHERE user_id = $1 AND status <> 'cancelled'
               AND abs(extract(epoch FROM eaten_at - $2::timestamptz)) <= $3
               AND carbs_g IS NOT DISTINCT FROM $4::numeric
+              AND client_uuid <> $5
             LIMIT 1`,
-          [userId, input.eatenAt, DUPLICATE_WINDOW_SEC, input.carbsG ?? null],
+          [userId, input.eatenAt, DUPLICATE_WINDOW_SEC, input.carbsG ?? null, clientIdToUuid(input.clientId)],
         );
         if (dup.rows[0]) return { status: 'duplicate', meal: null, duplicateOf: dup.rows[0].meal_id };
       }
@@ -192,6 +193,7 @@ export class EventsService {
         `INSERT INTO meal_events (user_id, client_uuid, eaten_at, status, carbs_g, carbs_provenance, fat_g, protein_g,
                                   fiber_g, glycemic_index, eaten_at_source, timing_uncertainty_min, absorption_class, note, label)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'user_entered',$11,$12,$13,$14)
+         ON CONFLICT (user_id, client_uuid) DO NOTHING
          RETURNING ${MEAL_COLUMNS}`,
         [
           userId,
@@ -210,7 +212,12 @@ export class EventsService {
           input.label ?? null,
         ],
       );
-      return { status: 'created', meal: mapMeal(row.rows[0] as DbMeal) };
+      if (!row.rows[0]) {
+        // a concurrent request with the same client id won the insert: this one is a repeat of it
+        const twin = await this.mealByClientUuid(c, userId, clientIdToUuid(input.clientId));
+        return { status: 'exists', meal: twin };
+      }
+      return { status: 'created', meal: mapMeal(row.rows[0]) };
     });
   }
 
@@ -232,6 +239,7 @@ export class EventsService {
                                   ai_carbs_low_g, ai_carbs_high_g, ai_confidence, model_version, prompt_version,
                                   analysis_raw, eaten_at_source, timing_uncertainty_min, note, label)
          VALUES ($1,$2,$3,'draft',$4,'estimated',NULL,$5,$6,$7,$8,$9,'ok',$4,$10,$11,$12,$13,$14,$15,'photo_time',$16,$17,$18)
+         ON CONFLICT (user_id, client_uuid) DO NOTHING
          RETURNING ${MEAL_COLUMNS}`,
         [
           userId,
@@ -254,7 +262,11 @@ export class EventsService {
           photoMealLabel(a.items.map((i) => i.name)),
         ],
       );
-      const meal = mapMeal(row.rows[0] as DbMeal);
+      if (!row.rows[0]) {
+        const twin = await this.mealByClientUuid(c, userId, args.clientUuid);
+        return { status: 'exists', meal: twin };
+      }
+      const meal = mapMeal(row.rows[0]);
       for (const [i, item] of a.items.entries()) {
         await c.query(
           `INSERT INTO meal_items (meal_id, position, name, portion_description, estimated_grams, carbs_g, calories_kcal, confidence, from_ai)
@@ -392,8 +404,9 @@ export class EventsService {
             WHERE user_id = $1 AND kind = $2 AND confirmation <> 'planned' AND status = 'active'
               AND abs(extract(epoch FROM administered_at - $3::timestamptz)) <= $4
               AND units_administered IS NOT DISTINCT FROM $5::numeric
+              AND client_uuid <> $6
             LIMIT 1`,
-          [userId, input.kind, input.administeredAt, DUPLICATE_WINDOW_SEC, input.unitsAdministered ?? null],
+          [userId, input.kind, input.administeredAt, DUPLICATE_WINDOW_SEC, input.unitsAdministered ?? null, clientIdToUuid(input.clientId)],
         );
         if (dup.rows[0]) return { status: 'duplicate', insulin: null, duplicateOf: dup.rows[0].insulin_id };
       }
@@ -401,6 +414,7 @@ export class EventsService {
         `INSERT INTO insulin_events (user_id, client_uuid, administered_at, kind, insulin_type, units_administered,
                                      units_suggested, confirmation, source, meal_id, timing_uncertain)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (user_id, client_uuid) DO NOTHING
          RETURNING ${INSULIN_COLUMNS}`,
         [
           userId,
@@ -416,7 +430,14 @@ export class EventsService {
           input.timingUncertain ?? false,
         ],
       );
-      return { status: 'created', insulin: mapInsulin(row.rows[0] as DbInsulin) };
+      if (!row.rows[0]) {
+        const twin = await c.query<DbInsulin>(
+          `SELECT ${INSULIN_COLUMNS} FROM insulin_events WHERE user_id = $1 AND client_uuid = $2`,
+          [userId, clientIdToUuid(input.clientId)],
+        );
+        return { status: 'exists', insulin: twin.rows[0] ? mapInsulin(twin.rows[0]) : null };
+      }
+      return { status: 'created', insulin: mapInsulin(row.rows[0]) };
     });
   }
 

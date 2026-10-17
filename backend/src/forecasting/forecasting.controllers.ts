@@ -16,9 +16,11 @@ import {
   Res,
   ServiceUnavailableException,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AppTokenGuard } from '../common/app-token.guard.js';
+import { NoStoreInterceptor } from '../common/no-store.interceptor.js';
 import { createRateLimitGuard, envInt } from '../common/rate-limit.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { DbService, describeDbError } from '../db/db.service.js';
@@ -76,6 +78,7 @@ async function guarded<T>(db: DbService, fn: () => Promise<T>): Promise<T> {
 
 @Controller('forecast')
 @UseGuards(AppTokenGuard, ForecastingRateLimit)
+@UseInterceptors(NoStoreInterceptor)
 export class ForecastController {
   constructor(
     @Inject(ForecastService) private readonly forecast: ForecastService,
@@ -119,6 +122,7 @@ export class ForecastController {
 
 @Controller('events')
 @UseGuards(AppTokenGuard, ForecastingRateLimit)
+@UseInterceptors(NoStoreInterceptor)
 export class EventsController {
   constructor(
     @Inject(EventsApiService) private readonly api: EventsApiService,
@@ -177,6 +181,7 @@ export class EventsController {
 
 @Controller('therapy')
 @UseGuards(AppTokenGuard, ForecastingRateLimit)
+@UseInterceptors(NoStoreInterceptor)
 export class TherapyController {
   constructor(
     @Inject(TherapyService) private readonly therapy: TherapyService,
@@ -187,7 +192,10 @@ export class TherapyController {
   /** The settings in force now (or `status: "not_set"`). Field names carry the unit. */
   @Get('settings')
   async get() {
-    return guarded(this.db, async () => this.therapy.getView((await this.users.primary()).userId));
+    return guarded(this.db, async () => {
+      const user = await this.users.primary();
+      return { ...(await this.therapy.getView(user.userId)), timezone: user.timezone };
+    });
   }
 
   @Get('settings/history')
@@ -198,6 +206,12 @@ export class TherapyController {
   /** Saves a NEW version of the settings you enter. Never edits history; never changes automatically. */
   @Put('settings')
   async put(@Body(new ZodValidationPipe(therapySettingsSchema)) body: TherapySettingsInput) {
-    return guarded(this.db, async () => this.therapy.setSettings((await this.users.primary()).userId, body));
+    return guarded(this.db, async () => {
+      const user = await this.users.primary();
+      // Ratios are "minutes after local midnight": the time zone they are read in must be the person's own.
+      if (body.timezone !== undefined) await this.users.setTimezone(user.userId, body.timezone);
+      const view = await this.therapy.setSettings(user.userId, body);
+      return { ...view, timezone: body.timezone ?? user.timezone };
+    });
   }
 }

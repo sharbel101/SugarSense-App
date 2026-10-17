@@ -39,14 +39,29 @@ then tell the user.
 
 ## 1. What the backend now offers (and what is NOT live yet)
 
-**Important - deployment status:** the code and the database migration exist and are tested, but the running public API on the VM is still
-the old backend. On the public URL `GET /forecast`, `/events/*` and `/therapy/*` currently return **404**, and `POST /meals/analyze`
-does not yet return `mealEventId` / `forecast`. The user will say when it is deployed. Until then:
+**Deployment status (updated 2026-10-17):** the first version of these routes is live on the public API (`GET /forecast`, `/events/*`,
+`/therapy/*`, and `POST /meals/analyze` with `mealEventId` / `forecast` / `forecastNote`). The follow-up fixes listed in the box below are
+tested but may not be deployed yet; build to the contract as written here, it is a superset and compatible. Always:
 
 * build against the contract with stubbed `fetch` in tests (plain-Node tests like `tests/events.test.mjs`);
-* treat 404/503 from these routes as "the server cannot do this yet": keep the **old** behaviour (the glucose-only forecast from `GET /glucose`),
+* treat 404/503 from these routes as "the server cannot do this right now": keep the **old** behaviour (the glucose-only forecast from `GET /glucose`),
   keep logged events **pending on the device**, and say so in plain words. Never crash, never fake success;
-* when the user says it is deployed, run the real end-to-end check in section 10.
+* run the real end-to-end check in section 10.
+
+**Contract additions after a full simulated-usage test (2026-10-17) - all additive:**
+
+* `models.eventLayerEvidence: { status: 'none_yet' | 'supports' | 'against' | 'mixed', samples }` on every `ok` forecast: how well the meal/insulin
+  adjustment has done against the glucose-only line on this person's own stored outcomes. While `none_yet` (fewer than 30 scored forecasts per
+  horizon) show the adjusted line as "not yet validated" in the About-this-forecast panel; never as proven. `against` / `mixed`: say so plainly.
+* `baseline_unavailable` now also carries `mealAware` (the logged events, coverage and on-board estimates) so the screen can still list what was
+  logged. Its `notes` say plainly that no forecast line exists. Do not draw a line from it.
+* `PUT /therapy/settings` accepts `timezone` (IANA name, e.g. `Asia/Beirut`; use the device's zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
+  Time-of-day ratio segments are read in that zone. Send it with every save.
+* A cancelled meal's `GET /events/meals/:id/coverage` answers **404**, not an error banner: treat it as "nothing to show".
+* Responses carry `Cache-Control: no-store`; do not add client-side caching on top.
+* Resending the same `clientId` (an offline retry, or a double tap) always returns the existing event - safe to retry; after a queued entry is finally
+  sent, **refresh the "Logged today" list** (it kept showing "not available" after a failed refresh until the app was reloaded).
+* The layer now removes the part of the rise the glucose-only model already extrapolates (trend-overlap correction). No UI change; do not describe it to users.
 
 **Which API draws what (this answers "do we need new APIs?" - no new backend work for the main flow):**
 
@@ -215,7 +230,7 @@ Routes: `GET /therapy/settings`, `PUT /therapy/settings`, `GET /therapy/settings
 |---|---|
 | `ok`, events included | Chart as in C, chips, prompts from D, notes expandable |
 | `ok`, nothing logged | Same chart; `adjusted == baseline` so no grey line; IOB "unknown", COB "none logged" |
-| `baseline_unavailable` | History only + the server's `reason`; no forecast line; IOB/COB chips hidden (nothing is estimated without a forecast); the "+" button still works |
+| `baseline_unavailable` | History only + the server's `reason`; no forecast line; IOB/COB chips hidden (nothing is estimated without a forecast); the "+" button still works; the logged-entry list may still use `mealAware.events` |
 | `stale` / `unavailable` | Exactly today's stale/unavailable treatment from `glucoseState.ts` |
 | network failure | Previous forecast kept <= 10 min with "as of HH:MM", then dropped |
 | 404 / 503 from `/forecast` | Fall back to the `/glucose` forecast line + "Meal and insulin entries are not included right now." |
