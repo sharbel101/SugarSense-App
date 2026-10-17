@@ -5,6 +5,20 @@ import { ENGINE_LAYER_VERSION } from '../engine/params.js';
 import { OutcomeService } from './outcome.service.js';
 import { ParametersService } from './parameters.service.js';
 
+/**
+ * SQL condition: the forecast run behind prediction alias `alias` used no entry that was LATER withdrawn (cancelled). A
+ * person who withdraws a meal or a dose is saying it was a mistake, so forecasts that relied on it are neither trustworthy
+ * training examples nor fair evidence about the event layer. The stored predictions themselves are never changed.
+ */
+export const NO_WITHDRAWN_EVENTS = (alias: string): string => `
+  AND NOT EXISTS (
+    SELECT 1 FROM prediction_event_links l
+      LEFT JOIN meal_events me ON me.meal_id = l.meal_id
+      LEFT JOIN insulin_events ie ON ie.insulin_id = l.insulin_id
+      LEFT JOIN insulin_events li ON li.insulin_id = l.linked_insulin_id
+     WHERE l.run_id = ${alias}.run_id
+       AND (me.status = 'cancelled' OR ie.status = 'cancelled' OR li.status = 'cancelled'))`;
+
 /** Horizons used to learn the scales: those inside the glucose-only model's measured range. */
 const FIT_HORIZONS_MIN = [60, 120];
 /** At most one parameter update per this many hours (spec: daily, rate-limited). */
@@ -92,6 +106,7 @@ export class PersonalizationService {
               round(AVG((o.within_interval)::int)::numeric, 3), 0.80
          FROM predictions p JOIN prediction_outcomes o USING (prediction_id)
         WHERE p.user_id = $1 AND o.observed_at > now() - make_interval(days => $2)
+          ${NO_WITHDRAWN_EVENTS('p')}
         GROUP BY p.user_id, p.model_version, p.feature_config, p.horizon_min
        ON CONFLICT ON CONSTRAINT model_performance_dedupe DO NOTHING`,
       [userId, ROLLING_WINDOW_DAYS],
@@ -113,6 +128,7 @@ export class PersonalizationService {
           WHERE p.user_id = $1 AND p.model_version LIKE $2 AND p.horizon_min = ANY($3::int[])
             AND p.feature_config <> 'glucose_only'
             AND (p.input_snapshot->>'eligible')::boolean IS TRUE
+            ${NO_WITHDRAWN_EVENTS('p')}
           ORDER BY p.anchor_at, p.horizon_min, p.created_at DESC) x
        ORDER BY anchor_at`,
       [userId, `${ENGINE_LAYER_VERSION}%`, FIT_HORIZONS_MIN],
@@ -228,6 +244,7 @@ export class PersonalizationService {
          JOIN prediction_outcomes ob ON ob.prediction_id = b.prediction_id
         WHERE a.user_id = $1 AND a.model_version LIKE $2 AND a.feature_config <> 'glucose_only'
           AND ($3::timestamptz IS NULL OR a.anchor_at >= $3::timestamptz)
+          ${NO_WITHDRAWN_EVENTS('a')}
         GROUP BY a.horizon_min, a.feature_config
         ORDER BY a.horizon_min, a.feature_config`,
       [userId, `${ENGINE_LAYER_VERSION}%`, sinceIso ?? null],

@@ -514,6 +514,144 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
     });
   });
 
+  describe('withdrawing (cancelling) entries', () => {
+    const latestRunLinks = async (rig: Rig): Promise<{ meal_id: string | null; insulin_id: string | null; role: string; role_reason: string | null }[]> =>
+      (
+        await rig.db.query<{ meal_id: string | null; insulin_id: string | null; role: string; role_reason: string | null }>(
+          `SELECT l.meal_id, l.insulin_id, l.role, l.role_reason FROM prediction_event_links l
+            WHERE l.run_id = (SELECT run_id FROM forecast_runs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)`,
+          [rig.userId],
+        )
+      ).rows;
+
+    it('a withdrawn meal and dose act nowhere (line, events, links, "insulin recorded") but stay in the history', async () => {
+      const rig = makeRig({ glucose: 130, baseline: (m) => 130 + m / 10 });
+      await setTestTherapy(rig);
+      const meal = await rig.api.addMeal({ clientId: 'wd-meal-000001', eatenAt: iso(nowSec() - 300), carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: 'wd-dose-000001', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual', mealId: meal.meal!.id });
+      expect(ok(dose.forecast).mealAware.changedForecast).toBe(true);
+      expect(await latestRunLinks(rig)).toHaveLength(2);
+
+      expect((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled', expectedRevision: 1 })).result).toBe('updated');
+      const last = await rig.api.editInsulin(dose.insulin!.id, { status: 'cancelled', expectedRevision: 1 });
+      expect(last.result).toBe('updated');
+      const f = ok(last.forecast);
+      expect(f.mealAware.changedForecast).toBe(false);
+      expect(f.mealAware.events).toEqual([]);
+      expect(f.mealAware.availability).toMatchObject({ mealsUsed: 0, mealsRangeOnly: 0, mealsNotUsed: 0, insulin: 'none_recorded', insulinDosesUsed: 0, insulinDosesRangeOnly: 0, insulinOnBoardUnits: null, carbsOnBoardGrams: null });
+      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline);
+      // the NEW run stored no link to either entry
+      expect(await latestRunLinks(rig)).toEqual([]);
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1 AND feature_config = 'glucose_only'", [rig.userId])).toBeGreaterThan(0);
+
+      // kept: rows, revision history, and the OLD runs that did use them (history is never rewritten)
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM insulin_events WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM event_revisions WHERE entity_type = 'meal' AND entity_id = $1", [meal.meal!.id])).toBe(1);
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM event_revisions WHERE entity_type = 'insulin' AND entity_id = $1", [dose.insulin!.id])).toBe(1);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM prediction_event_links WHERE meal_id = $1', [meal.meal!.id])).toBeGreaterThan(0);
+      const recent = await rig.api.recent(3);
+      expect(recent.meals).toEqual([]);
+      expect(recent.insulin).toEqual([]);
+      expect(await rig.forecast.mealCoverage(meal.meal!.id)).toBeNull();
+    });
+
+    it.each(['bolus', 'correction'] as const)('a %s dose declared against a withdrawn meal does not lower the line (and is not matched to another meal)', async (kind) => {
+      const rig = makeRig({ glucose: 150, baseline: (m) => 150 + m / 10 });
+      await setTestTherapy(rig);
+      const meal = await rig.api.addMeal({ clientId: `wd-link-meal-${kind}`, eatenAt: iso(nowSec() - 300), carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: `wd-link-dose-${kind}`, administeredAt: iso(nowSec() - 300), kind, confirmation: 'confirmed', unitsAdministered: 6, source: 'manual', mealId: meal.meal!.id });
+      const live = ok(dose.forecast);
+      expect(live.mealAware.availability).toMatchObject({ mealsUsed: 1, insulinDosesUsed: 1 });
+      expect(at(live, 60).adjusted).not.toBe(at(live, 60).baseline);
+
+      const f = ok((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled' })).forecast);
+      expect(f.mealAware.events).toHaveLength(1);
+      expect(f.mealAware.events[0]).toMatchObject({ id: dose.insulin!.id, type: 'insulin', role: 'range_only', reason: 'linked_meal_cancelled' });
+      expect(f.mealAware.availability).toMatchObject({ mealsUsed: 0, insulinDosesUsed: 0, insulinDosesRangeOnly: 1, insulin: 'logged' });
+      expect(f.mealAware.availability.insulinOnBoardUnits).toBeGreaterThan(4); // it was taken: still on board
+      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline); // the line is not lowered
+      expect(f.notes.join(' ')).toMatch(/for a meal you removed/);
+      // the range is stretched downward instead (compare with a person who logged nothing)
+      const plain = ok(await makeRig({ glucose: 150, baseline: (m) => 150 + m / 10 }).forecast.run());
+      expect(at(f, 60).low).toBeLessThan(at(plain, 60).low);
+      const links = await latestRunLinks(rig);
+      expect(links).toEqual([{ meal_id: null, insulin_id: dose.insulin!.id, role: 'scenario_only', role_reason: 'linked_meal_cancelled' }]);
+    });
+
+    it('a dose matched to its meal only by time is read as "dose without a recorded meal" once the meal is withdrawn', async () => {
+      const rig = makeRig({ glucose: 150, baseline: (m) => 150 + m / 10 });
+      await setTestTherapy(rig);
+      const when = iso(nowSec() - 300);
+      const meal = await rig.api.addMeal({ clientId: 'wd-auto-meal-001', eatenAt: when, carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: 'wd-auto-dose-001', administeredAt: when, kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual' });
+      expect(ok(dose.forecast).mealAware.availability).toMatchObject({ mealsUsed: 1, insulinDosesUsed: 1 });
+      const f = ok((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled' })).forecast);
+      expect(f.mealAware.events[0]).toMatchObject({ id: dose.insulin!.id, role: 'range_only', reason: 'dose_without_recorded_meal' });
+      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline);
+    });
+
+    it('a withdrawn "I took none" record no longer says that insulin was confirmed absent', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const { z } = await addMealAndZero(rig, 40, 5);
+      expect(ok(z.forecast).mealAware.availability).toMatchObject({ mealsUsed: 1, insulin: 'confirmed_none' });
+      const f = ok((await rig.api.editInsulin(z.insulin!.id, { status: 'cancelled' })).forecast);
+      expect(f.mealAware.availability).toMatchObject({ mealsUsed: 0, mealsRangeOnly: 1, insulin: 'none_recorded' });
+      expect(f.mealAware.changedForecast).toBe(false);
+    });
+
+    it('withdrawing twice is "unchanged" (even with an old revision) and carries the forecast; nothing else may be done to a withdrawn entry', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const meal = await rig.api.addMeal({ clientId: 'wd-twice-meal-01', eatenAt: iso(nowSec() - 300), carbsG: 30 });
+      const dose = await rig.api.addInsulin({ clientId: 'wd-twice-dose-01', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual', mealId: meal.meal!.id });
+
+      // an active entry with a stale revision is a conflict and stays active
+      expect((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled', expectedRevision: 7 })).result).toBe('conflict');
+      expect((await rig.api.editInsulin(dose.insulin!.id, { status: 'cancelled', expectedRevision: 7 })).result).toBe('conflict');
+      expect((await rig.api.recent(3)).meals).toHaveLength(1);
+
+      const m1 = await rig.api.editMeal(meal.meal!.id, { status: 'cancelled', expectedRevision: 1 });
+      const d1 = await rig.api.editInsulin(dose.insulin!.id, { status: 'cancelled', expectedRevision: 1 });
+      expect([m1.result, d1.result]).toEqual(['updated', 'updated']);
+      expect(ok(m1.forecast).status).toBe('ok');
+      expect(ok(d1.forecast).status).toBe('ok');
+      for (const expectedRevision of [1, 2, undefined]) {
+        const m2 = await rig.api.editMeal(meal.meal!.id, { status: 'cancelled', ...(expectedRevision ? { expectedRevision } : {}) });
+        const d2 = await rig.api.editInsulin(dose.insulin!.id, { status: 'cancelled', ...(expectedRevision ? { expectedRevision } : {}) });
+        expect([m2.result, d2.result]).toEqual(['unchanged', 'unchanged']);
+        expect([m2.meal!.status, d2.insulin!.status]).toEqual(['cancelled', 'cancelled']);
+        expect([m2.meal!.revision, d2.insulin!.revision]).toEqual([2, 2]);
+        expect(ok(m2.forecast).status).toBe('ok');
+        expect(ok(d2.forecast).status).toBe('ok');
+      }
+      // no extra history rows from the repeats
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM event_revisions WHERE entity_id = $1", [meal.meal!.id])).toBe(1);
+      expect(await count(rig, "SELECT COUNT(*) AS n FROM event_revisions WHERE entity_id = $1", [dose.insulin!.id])).toBe(1);
+
+      const edit = await rig.api.editMeal(meal.meal!.id, { carbsG: 99 });
+      expect(edit).toMatchObject({ result: 'invalid', reason: 'a cancelled entry cannot be edited', forecast: null });
+      expect((await rig.api.editMeal(meal.meal!.id, { status: 'confirmed' })).result).toBe('invalid'); // no silent revival
+      expect((await rig.api.editInsulin(dose.insulin!.id, { unitsAdministered: 9 })).result).toBe('invalid');
+      expect((await rig.api.editInsulin(dose.insulin!.id, { status: 'cancelled' })).forecast).not.toBeNull();
+    });
+
+    it('the recent list carries "status" on meals and insulin and leaves withdrawn rows out', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const a = await rig.api.addMeal({ clientId: 'wd-list-meal-01', eatenAt: iso(nowSec() - 900), carbsG: 20 });
+      const b = await rig.api.addMeal({ clientId: 'wd-list-meal-02', eatenAt: iso(nowSec() - 3000), carbsG: 35 });
+      const c = await rig.api.addInsulin({ clientId: 'wd-list-dose-01', administeredAt: iso(nowSec() - 900), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 1, source: 'manual' });
+      const e = await rig.api.addInsulin({ clientId: 'wd-list-dose-02', administeredAt: iso(nowSec() - 3000), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      await rig.api.editMeal(a.meal!.id, { status: 'cancelled' });
+      await rig.api.editInsulin(c.insulin!.id, { status: 'cancelled' });
+      const r = await rig.api.recent(3);
+      expect(r.meals.map((x) => [x.id, x.status])).toEqual([[b.meal!.id, 'manual_entry']]);
+      expect(r.insulin.map((x) => [x.id, x.status])).toEqual([[e.insulin!.id, 'active']]);
+    });
+  });
+
   describe('labels, cancelling an insulin entry, and carbs / insulin on board along the forecast', () => {
     it('meals carry a short label: typed, edited, and derived from the items of a photo meal', async () => {
       const rig = makeRig({ glucose: 130, baseline: () => 130 });
@@ -932,7 +1070,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const TM = nowSec() - 6 * 3600;
       const truth = (t: number): number => 120 + 0.8 * CSF * CARBS * mealCumulativeAbsorption((t - TM) / 60, 40);
 
-      async function build(withInsulinRecord: boolean, anchors = 19): Promise<Rig> {
+      async function build(withInsulinRecord: boolean, anchors = 19, beforeReadings?: (rig: Rig) => Promise<void>): Promise<Rig> {
         const rig = makeRig();
         await setTestTherapy(rig, 10, 50);
         await rig.api.addMeal({ clientId: 'syn-meal-0001', eatenAt: iso(TM), carbsG: CARBS });
@@ -944,6 +1082,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
           rig.fake.response = okGlucose(a, truth(a), () => truth(a)); // baseline = persistence, blind to the meal
           await rig.forecast.run({ nowSec: a + 120 });
         }
+        if (beforeReadings) await beforeReadings(rig);
         const readings = [] as { time: string; value: number }[];
         for (let t = TM - 600; t <= nowSec() - 2 * 3600; t += 300) readings.push({ time: iso(t), value: Math.round(truth(t) * 10) / 10 });
         await rig.ingest.recordReadings(readings);
@@ -1003,6 +1142,25 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
         expect(anchors).toBe(0);
         expect(await rig.parameters.history(rig.userId, 'm_csf')).toHaveLength(0);
         expect((await rig.parameters.getActive(rig.userId)).params.mCsf).toBe(1);
+      });
+
+      it.each(['the meal', 'its "I took none" record'] as const)('withdrawing %s takes the earlier forecasts out of learning, evidence and performance (they are kept, not rewritten)', async (which) => {
+        const rig = await build(true, 19, async (r) => {
+          const meals = (await r.db.query<{ meal_id: string }>('SELECT meal_id FROM meal_events WHERE user_id = $1', [r.userId])).rows;
+          const doses = (await r.db.query<{ insulin_id: string }>('SELECT insulin_id FROM insulin_events WHERE user_id = $1', [r.userId])).rows;
+          if (which === 'the meal') expect((await r.api.editMeal(meals[0]!.meal_id, { status: 'cancelled' })).result).toBe('updated');
+          else expect((await r.api.editInsulin(doses[0]!.insulin_id, { status: 'cancelled' })).result).toBe('updated');
+        });
+        // the control (no withdrawal) is test 6 above: the same data learns. Here nothing may be learned or reported.
+        expect((await rig.personalization.eligibleExamples(rig.userId)).anchors).toBe(0);
+        expect(await rig.parameters.history(rig.userId, 'm_csf')).toHaveLength(0);
+        expect((await rig.parameters.getActive(rig.userId)).params.mCsf).toBe(1);
+        expect(await rig.personalization.compareBaselineVsAdjusted(rig.userId)).toEqual([]);
+        expect(await rig.personalization.layerEvidence(rig.userId, Date.now() + 10 * 60_000)).toEqual({ status: 'none_yet', samples: 0 });
+        expect(await count(rig, "SELECT COUNT(*) AS n FROM model_performance WHERE user_id = $1 AND feature_config <> 'glucose_only'", [rig.userId])).toBe(0);
+        // history is untouched: the forecasts and their scored outcomes are still stored
+        expect(await count(rig, "SELECT COUNT(*) AS n FROM predictions WHERE user_id = $1 AND feature_config <> 'glucose_only'", [rig.userId])).toBeGreaterThan(0);
+        expect(await count(rig, "SELECT COUNT(*) AS n FROM prediction_outcomes o JOIN predictions p USING (prediction_id) WHERE p.user_id = $1 AND p.feature_config <> 'glucose_only'", [rig.userId])).toBeGreaterThan(0);
       });
 
       it('does not move anything on too little evidence', async () => {

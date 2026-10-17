@@ -412,6 +412,7 @@ export function buildEngineInputs(a: {
         uncertain: i.confirmation === 'uncertain' || i.timingUncertain,
         isfMgdlPerU: t.isfMgdlPerU,
         declaredMealId: i.mealId,
+        ...(i.mealCancelled ? { declaredMealCancelled: true } : {}),
       });
     }
   }
@@ -528,6 +529,9 @@ function buildNotes(a: {
   }
   if (reasons.has('dose_without_recorded_meal')) {
     notes.push('An insulin dose has no meal recorded with it. It is not used for the central line; the range is widened downward.');
+  }
+  if (reasons.has('linked_meal_cancelled')) {
+    notes.push('An insulin dose was recorded for a meal you removed. It is not used for the central line; the range is widened downward.');
   }
   if (reasons.has('planned_not_delivered')) notes.push('A planned dose is not counted until you record that it was taken.');
   if (reasons.has('not_a_meal_bolus')) notes.push('Basal and other non-meal insulin entries are not used as a meal dose.');

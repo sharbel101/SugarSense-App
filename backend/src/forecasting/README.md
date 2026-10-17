@@ -89,8 +89,8 @@ tells anyone to take insulin.
 | `POST /forecast/counterfactual` `{excludeMealIds[], horizonMin?}` | What-if for a future "clear recent meals" action: those meals are left out, **delivered insulin still counts**, nothing is deleted or saved, labelled `counterfactual: true` |
 | `GET /forecast/evaluation` | Stored-outcome comparison of the layer against the glucose-only baseline, per horizon |
 | `POST /events/meals` | Manual meal (`clientId`, `eatenAt`, `carbsG?`, `fatG?`, `proteinG?`, `fiberG?`, `absorptionClass?`, ...). 201 created / 200 same `clientId` / 409 probable double entry / 422 invalid time |
-| `PATCH /events/meals/:id` | Correct a meal (`expectedRevision` for optimistic concurrency; `label`, carbs, time, speed class, `status: cancelled`). Records a revision and the before/after numbers |
-| `POST /events/insulin`, `PATCH /events/insulin/:id` | Insulin entry. `confirmation`: `confirmed` (taken), `uncertain` (taken, approximate), `planned` (not taken yet). `PATCH {status:"cancelled"}` withdraws a mistaken entry: kept with its revision history, no longer acts in forecasts, no longer counts as "insulin recorded", not listed again |
+| `PATCH /events/meals/:id` | Correct a meal (`expectedRevision` for optimistic concurrency; `label`, carbs, time, speed class, `status: cancelled` to withdraw it). Records a revision and the before/after numbers. See "Withdrawn entries" |
+| `POST /events/insulin`, `PATCH /events/insulin/:id` | Insulin entry. `confirmation`: `confirmed` (taken), `uncertain` (taken, approximate), `planned` (not taken yet). `PATCH {status:"cancelled"}` withdraws a mistaken entry (see "Withdrawn entries") |
 | `GET /events/meals/:id/coverage` | Carbohydrate vs insulin coverage under the ratio that applied at that meal |
 | `GET /events/recent?hours=` | Recent meals/insulin for a picker |
 | `GET /therapy/settings`, `GET /therapy/settings/history`, `PUT /therapy/settings` | ICR (g per unit) and ISF (mg/dL per unit) by time of day, versioned. `PUT` also accepts `timezone` (IANA name, e.g. `Asia/Beirut`): the local clock the time-of-day segments are read in |
@@ -111,6 +111,28 @@ Meals have a short `label` (typed, or derived from the items of a photo meal, e.
 
 Responses expose display fields only: no ICR/ISF values, scales, snapshots, raw Gemini JSON, internal ids other than
 event ids, or any database detail (tests assert this).
+
+## Withdrawn entries (the app's trash button)
+
+`PATCH /events/meals/:id` and `PATCH /events/insulin/:id` with `{ "status": "cancelled", "expectedRevision": n }` withdraw an entry. Nothing is deleted:
+the row and its revision history stay. A withdrawn entry is ignored everywhere:
+
+* **Live forecast:** not loaded, so it is not in the line, the band, `mealAware.events`, the carbs/insulin on board, or "insulin recorded" (a
+  withdrawn "I took none" record no longer says insulin was confirmed absent: the meal is range-only again).
+* **New runs:** `forecast_runs` and `prediction_event_links` of runs made after the withdrawal contain no row for it. Older runs that used it
+  are kept unchanged (history is never rewritten).
+* **Linking:** a withdrawn meal is not offered to any dose. A dose that was declared against a withdrawn meal is read as "taken for a meal that
+  no longer exists" (`linked_meal_cancelled`, any kind): it does **not** move the central line, widens the band downward, and still counts as
+  insulin on board because it was taken. A dose matched only by time becomes "dose without a recorded meal" (same effect).
+* **Learning, evidence, performance:** forecasts made earlier from a run that used an entry which was LATER withdrawn (the meal, a dose, or the
+  dose linked to a meal) are excluded from the scale fitting, from `models.eventLayerEvidence` / `GET /forecast/evaluation` and from
+  `model_performance` (`NO_WITHDRAWN_EVENTS` in `personalization.service.ts`). A withdrawn entry is never a trustworthy training event.
+* **Responses:** the PATCH answer carries the refreshed `forecast`. Withdrawing an entry that is already withdrawn answers **200** with
+  `result: "unchanged"` (also with an old `expectedRevision`, as an offline retry would send) and still carries the forecast. Any other edit of a
+  withdrawn entry, including setting a meal back to `confirmed`, is refused with 422 `a cancelled entry cannot be edited` (no silent revival;
+  log it again as a new entry). A stale `expectedRevision` on an entry that is still active is 409 `conflict` and changes nothing. A status other
+  than `cancelled` on insulin (or any unknown status) is 400. `GET /events/recent` leaves withdrawn rows out and carries `status` on every meal
+  (`draft` / `confirmed` / `manual_entry`) and insulin entry (`active`).
 
 ## Data (migration `0006_event_forecasting.sql`, plus 0001-0005)
 

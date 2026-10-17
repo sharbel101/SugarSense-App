@@ -240,6 +240,15 @@ describe('event layer', () => {
     expect(at(r, 120, 'insulinEffect')).toBeCloseTo(50 * 2 * (insulinCumulativeAction(120, 75, 300)), 6);
   });
 
+  it.each(['bolus', 'correction'] as const)('a %s dose declared against a WITHDRAWN meal never lowers the mean, whatever its kind', (kind) => {
+    const r = layer({ insulin: [dose({ kind, declaredMealCancelled: true })], insulinHistory: 'logged' });
+    expect(r.series.insulinApplied.every((v) => v === 0)).toBe(true);
+    expect(Math.max(...r.series.scenarioDown)).toBeGreaterThan(100); // the band is stretched downward instead
+    expect(r.dispositions[0]).toMatchObject({ role: 'scenario_only', reason: 'linked_meal_cancelled' });
+    expect(r.appliedInsulin).toBe(0);
+    expect(r.iobU).toBeGreaterThan(0); // it was still taken: it stays in the insulin-on-board count
+  });
+
   it('missing ICR or ISF: the meal is ignored with a stated reason, nothing is invented', () => {
     const r = layer({
       meals: [meal({ icrGPerU: null })],

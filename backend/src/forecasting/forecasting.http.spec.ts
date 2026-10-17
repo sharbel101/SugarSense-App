@@ -110,6 +110,59 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ unitsAdministered: 2 }).expect(422);
   });
 
+  it('withdrawing entries over HTTP: both routes, repeat = 200 unchanged, refreshed forecast, status in the list', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const when = iso(nowSec() - 300);
+    const m = await http.post('/events/meals').send({ clientId: 'wd-http-meal-01', eatenAt: when, carbsG: 50 }).expect(201);
+    const d = await http.post('/events/insulin').send({ clientId: 'wd-http-dose-01', administeredAt: when, kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 5, source: 'manual', mealId: m.body.meal.id }).expect(201);
+    const keepM = await http.post('/events/meals').send({ clientId: 'wd-http-meal-02', eatenAt: iso(nowSec() - 3000), carbsG: 20 }).expect(201);
+    const keepD = await http.post('/events/insulin').send({ clientId: 'wd-http-dose-02', administeredAt: iso(nowSec() - 3000), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 1, source: 'manual' }).expect(201);
+
+    // 1. a status that is not "cancelled" is rejected; "cancelled" is accepted on both routes, and an unknown id is a 404 (not a 400)
+    await http.patch(`/events/meals/${m.body.meal.id}`).send({ status: 'deleted' }).expect(400);
+    await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ status: 'deleted' }).expect(400);
+    const nobody = `${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}`;
+    await http.patch(`/events/meals/${nobody}`).send({ status: 'cancelled' }).expect(404);
+    await http.patch(`/events/insulin/${nobody}`).send({ status: 'cancelled' }).expect(404);
+    // a stale revision on an ACTIVE entry is still a conflict (and changes nothing)
+    await http.patch(`/events/meals/${m.body.meal.id}`).send({ status: 'cancelled', expectedRevision: 9 }).expect(409);
+    await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ status: 'cancelled', expectedRevision: 9 }).expect(409);
+
+    // 3. the answer carries the refreshed forecast, without the withdrawn entries
+    const cm = await http.patch(`/events/meals/${m.body.meal.id}`).send({ status: 'cancelled', expectedRevision: 1 }).expect(200);
+    expect(cm.body).toMatchObject({ result: 'updated', meal: { status: 'cancelled', revision: 2 } });
+    expect(cm.body.forecast.status).toBe('ok');
+    expect(cm.body.forecast.mealAware.events.map((e: { id: string }) => e.id)).not.toContain(m.body.meal.id);
+    const cd = await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ status: 'cancelled', expectedRevision: 1 }).expect(200);
+    expect(cd.body).toMatchObject({ result: 'updated', insulin: { status: 'cancelled', revision: 2 } });
+    expect(cd.body.forecast.status).toBe('ok');
+    expect(cd.body.forecast.mealAware.events.map((e: { id: string }) => e.id)).not.toContain(d.body.insulin.id);
+
+    // 4. withdrawing again - even with the old revision, as an offline retry would - is 200 "unchanged", with a forecast
+    for (const [route, id, body] of [['meals', m.body.meal.id, cm.body], ['insulin', d.body.insulin.id, cd.body]] as const) {
+      for (const send of [{ status: 'cancelled', expectedRevision: 1 }, { status: 'cancelled', expectedRevision: 2 }, { status: 'cancelled' }]) {
+        const again = await http.patch(`/events/${route}/${id}`).send(send).expect(200);
+        expect(again.body.result).toBe('unchanged');
+        expect((again.body.meal ?? again.body.insulin).status).toBe('cancelled');
+        expect((again.body.meal ?? again.body.insulin).revision).toBe(2);
+        expect(again.body.forecast.status).toBe('ok');
+      }
+      expect(body.result).toBe('updated');
+    }
+    // nothing else may be done to a withdrawn entry (no silent revival)
+    await http.patch(`/events/meals/${m.body.meal.id}`).send({ carbsG: 99 }).expect(422);
+    await http.patch(`/events/meals/${m.body.meal.id}`).send({ status: 'confirmed' }).expect(422);
+    await http.patch(`/events/insulin/${d.body.insulin.id}`).send({ unitsAdministered: 9 }).expect(422);
+
+    // 3. the list shows only live entries and carries "status" on both kinds
+    const recent = await http.get('/events/recent?hours=3').expect(200);
+    expect(recent.body.meals).toHaveLength(1);
+    expect(recent.body.insulin).toHaveLength(1);
+    expect(recent.body.meals[0]).toMatchObject({ id: keepM.body.meal.id, status: 'manual_entry' });
+    expect(recent.body.insulin[0]).toMatchObject({ id: keepD.body.insulin.id, status: 'active' });
+  });
+
   it('time zone: saved with the settings, validated, returned, and used to read the time-of-day ratios', async () => {
     const http = request(app.getHttpServer());
     await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], timezone: 'Mars/Olympus' }).expect(400);

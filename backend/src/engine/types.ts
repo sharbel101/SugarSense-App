@@ -46,6 +46,8 @@ export interface InsulinInput {
   uncertain: boolean;
   isfMgdlPerU: number | null;
   declaredMealId: string | null;
+  /** true when the meal this dose was declared against was withdrawn: the dose then has no meal to cover. */
+  declaredMealCancelled?: boolean;
 }
 
 export interface MealLink {

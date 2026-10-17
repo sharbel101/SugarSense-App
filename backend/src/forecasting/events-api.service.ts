@@ -136,7 +136,8 @@ export class EventsApiService {
   async editMeal(mealId: string, patch: EditMealInput): Promise<MealWriteResponse> {
     const { userId } = await this.users.primary();
     const r = await this.events.editMeal(userId, mealId, patch);
-    return this.finishMeal(r);
+    // Withdrawing an entry that is already withdrawn changes nothing, but the repeat (an offline retry) still gets the current forecast.
+    return this.finishMeal(r, r.status === 'unchanged' && r.meal?.status === 'cancelled');
   }
 
   async addInsulin(input: CreateInsulinInput): Promise<InsulinWriteResponse> {
@@ -148,7 +149,7 @@ export class EventsApiService {
   async editInsulin(insulinId: string, patch: EditInsulinInput): Promise<InsulinWriteResponse> {
     const { userId } = await this.users.primary();
     const r = await this.events.editInsulin(userId, insulinId, patch);
-    return this.finishInsulin(r);
+    return this.finishInsulin(r, r.status === 'unchanged' && r.insulin?.status === 'cancelled');
   }
 
   /** Recent entries a UI can list, e.g. to let someone choose meals for the what-if view. */
@@ -167,23 +168,23 @@ export class EventsApiService {
     return this.forecast.mealCoverage(mealId);
   }
 
-  private async finishMeal(r: MealWriteResult): Promise<MealWriteResponse> {
+  private async finishMeal(r: MealWriteResult, alsoRefresh = false): Promise<MealWriteResponse> {
     return {
       result: r.status,
       meal: r.meal ? toMealView(r.meal) : null,
       ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
       ...(r.reason ? { reason: r.reason } : {}),
-      forecast: CHANGED.has(r.status) ? await this.refresh() : null,
+      forecast: CHANGED.has(r.status) || alsoRefresh ? await this.refresh() : null,
     };
   }
 
-  private async finishInsulin(r: InsulinWriteResult): Promise<InsulinWriteResponse> {
+  private async finishInsulin(r: InsulinWriteResult, alsoRefresh = false): Promise<InsulinWriteResponse> {
     return {
       result: r.status,
       insulin: r.insulin ? toInsulinView(r.insulin) : null,
       ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
       ...(r.reason ? { reason: r.reason } : {}),
-      forecast: CHANGED.has(r.status) ? await this.refresh() : null,
+      forecast: CHANGED.has(r.status) || alsoRefresh ? await this.refresh() : null,
     };
   }
 

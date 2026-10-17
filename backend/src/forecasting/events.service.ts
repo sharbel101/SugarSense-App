@@ -51,6 +51,8 @@ export interface InsulinRow {
   timingUncertain: boolean;
   revision: number;
   status: 'active' | 'cancelled';
+  /** true when the meal this dose was declared against was withdrawn (cancelled). Only filled by `insulinBetween`. */
+  mealCancelled: boolean;
 }
 
 type DbMeal = {
@@ -89,6 +91,7 @@ type DbInsulin = {
   timing_uncertain: boolean;
   revision: number;
   status: 'active' | 'cancelled';
+  meal_cancelled?: boolean | null;
 };
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
@@ -135,6 +138,7 @@ const mapInsulin = (r: DbInsulin): InsulinRow => ({
   timingUncertain: r.timing_uncertain,
   revision: r.revision,
   status: r.status,
+  mealCancelled: r.meal_cancelled === true,
 });
 
 export type WriteStatus = 'created' | 'exists' | 'duplicate' | 'updated' | 'unchanged' | 'not_found' | 'conflict' | 'invalid';
@@ -295,6 +299,11 @@ export class EventsService {
       );
       const before = cur.rows[0] ? mapMeal(cur.rows[0]) : null;
       if (!before) return { status: 'not_found', meal: null };
+      if (before.status === 'cancelled') {
+        // Withdrawing twice is not an error (an offline retry may repeat it, with an old revision); nothing else may be done to it.
+        if (patch.status === 'cancelled') return { status: 'unchanged', meal: before };
+        return { status: 'invalid', meal: before, reason: 'a cancelled entry cannot be edited' };
+      }
       if (patch.expectedRevision !== undefined && patch.expectedRevision !== before.revision) {
         return { status: 'conflict', meal: before, reason: 'the meal was changed since you loaded it' };
       }
@@ -458,11 +467,13 @@ export class EventsService {
       );
       const before = cur.rows[0] ? mapInsulin(cur.rows[0]) : null;
       if (!before) return { status: 'not_found', insulin: null };
+      if (before.status === 'cancelled') {
+        // Withdrawing twice is not an error (an offline retry may repeat it, with an old revision); nothing else may be done to it.
+        if (patch.status === 'cancelled') return { status: 'unchanged', insulin: before };
+        return { status: 'invalid', insulin: before, reason: 'a cancelled entry cannot be edited' };
+      }
       if (patch.expectedRevision !== undefined && patch.expectedRevision !== before.revision) {
         return { status: 'conflict', insulin: before, reason: 'the entry was changed since you loaded it' };
-      }
-      if (before.status === 'cancelled' && patch.status !== 'cancelled') {
-        return { status: 'invalid', insulin: before, reason: 'a cancelled entry cannot be edited' };
       }
       if (patch.mealId) {
         const m = await c.query('SELECT 1 FROM meal_events WHERE meal_id = $1 AND user_id = $2', [patch.mealId, userId]);
@@ -534,7 +545,9 @@ export class EventsService {
 
   async insulinBetween(userId: string, fromSec: number, toSec_: number): Promise<InsulinRow[]> {
     const r = await this.db.query<DbInsulin>(
-      `SELECT ${INSULIN_COLUMNS} FROM insulin_events
+      `SELECT ${INSULIN_COLUMNS},
+              (SELECT m.status = 'cancelled' FROM meal_events m WHERE m.meal_id = insulin_events.meal_id) AS meal_cancelled
+         FROM insulin_events
         WHERE user_id = $1 AND status = 'active' AND administered_at BETWEEN $2 AND $3
         ORDER BY administered_at, insulin_id`,
       [userId, toIso(fromSec), toIso(toSec_)],
