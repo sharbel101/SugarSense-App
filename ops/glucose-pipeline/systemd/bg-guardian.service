@@ -1,0 +1,23 @@
+[Unit]
+Description=bg-guardian - glucose pipeline watchdog, incident alarm for the AI agent, tunnel discovery
+After=network-online.target bg.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bg/guardian
+EnvironmentFile=/home/ubuntu/API/.env
+EnvironmentFile=-/opt/forecast-web/forecast-web.env
+ExecStart=/usr/bin/node /home/ubuntu/bg/guardian/bg-guardian.mjs
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/bg/guardian
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

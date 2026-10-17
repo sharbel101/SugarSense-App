@@ -1,0 +1,17 @@
+[Unit]
+Description=cloudflared quick tunnel -> bg_service :8000 (phone collector data path; supervised, URL published by bg-guardian)
+After=network-online.target bg.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --logfile /home/ubuntu/bg-cloudflared.log --url http://127.0.0.1:8000
+Restart=always
+RestartSec=5
+# Quick tunnels have no SLA and the hostname changes on every start. That is fine here: systemd restarts
+# it, bg-guardian reads the new URL from the log and republishes it at /agent/endpoints on the stable
+# ngrok domain, and the phone script re-discovers it by itself.
+
+[Install]
+WantedBy=multi-user.target
