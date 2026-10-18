@@ -27,11 +27,13 @@ import { DbService, describeDbError } from '../db/db.service.js';
 import {
   counterfactualSchema,
   createInsulinSchema,
+  previewSchema,
   createMealSchema,
   editInsulinSchema,
   editMealSchema,
   forecastQuerySchema,
   type CounterfactualInput,
+  type PreviewInput,
   type CreateInsulinInput,
   type CreateMealInput,
   type EditInsulinInput,
@@ -101,6 +103,17 @@ export class ForecastController {
   @HttpCode(200)
   async counterfactual(@Body(new ZodValidationPipe(counterfactualSchema)) body: CounterfactualInput) {
     return this.forecast.run({ horizonMin: body.horizonMin, excludeMealIds: body.excludeMealIds, persist: false });
+  }
+
+  /**
+   * "What would this meal / this insulin amount do to my glucose?" before anything is saved. The meal (a stored draft by `mealId`, or
+   * typed grams) and/or the insulin amount are counted in full on top of what is logged; nothing is written and nothing counts in the real
+   * forecast until it is confirmed. A what-if of the numbers typed in, not a dose suggestion.
+   */
+  @Post('preview')
+  @HttpCode(200)
+  async preview(@Body(new ZodValidationPipe(previewSchema)) body: PreviewInput) {
+    return this.forecast.preview(body);
   }
 
   /** Stored-outcome comparison of the meal-aware layer against the glucose-only baseline. */

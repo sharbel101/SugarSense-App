@@ -81,6 +81,8 @@ export interface MealAwareDisplay {
   events: ForecastEventDisplay[];
   /** null when every logged entry already counts in the main line (or the what-if view would look the same). */
   allLoggedCounted: AllLoggedCountedDisplay | null;
+  /** Only on a preview (`POST /forecast/preview`, a photo's first analysis): what was tried. */
+  preview?: { mealId: string | null; insulinUnits: number | null };
 }
 
 export interface ForecastOkDisplay {
@@ -103,6 +105,11 @@ export interface ForecastOkDisplay {
   };
   /** Whether this forecast was written to the database (false for what-if views or if saving failed). */
   saved: boolean;
+  /**
+   * true = a PREVIEW: the meal and/or the insulin amount named in `mealAware.preview` are counted in full on top of what is
+   * already logged, but nothing is saved and none of it counts in the real forecast until it is confirmed.
+   */
+  preview?: true;
   /** Plain-language limits that apply to this forecast. */
   notes: string[];
   disclaimer: string;

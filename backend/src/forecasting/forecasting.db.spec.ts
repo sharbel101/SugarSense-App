@@ -150,8 +150,8 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const res = await mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]).analyzeMeal(photo);
       expect(res.status).toBe('ok');
       expect(res.forecast?.status).toBe('baseline_unavailable');
-      expect(res.forecastNote).toMatch(/meal is saved/i);
-      expect(res.forecastNote).not.toMatch(/Forecast includes this meal/);
+      expect(res.forecastNote).toMatch(/waiting for your confirmation/i);
+      expect(res.forecastNote).not.toMatch(/Forecast includes this meal|Preview of what this meal would do/);
       expect(forecastNoteFor(null)).toMatch(/could not be refreshed/);
       expect(forecastNoteFor({ status: 'stale', reason: 'x', lastMeasuredAt: null })).toMatch(/too old/);
       expect(forecastNoteFor({ status: 'unavailable', reason: 'x' })).toMatch(/not available/);
@@ -168,7 +168,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
 
   // ------------------------------------------------ 2/3/4. photo -> meal event -> forecast
   describe('food photo to forecast in one workflow', () => {
-    it('stores the validated analysis, creates a draft meal event and returns the forecast', async () => {
+    it('stores the validated analysis as a DRAFT and returns a PREVIEW of what the meal would do; the draft does not count', async () => {
       const rig = makeRig({ glucose: 130, baseline: () => 130 });
       await setTestTherapy(rig);
       const svc = mealService(rig, [{ kind: 'raw', rawText: detectedRaw, modelVersion: 'gemini-test' }]);
@@ -179,10 +179,22 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(res.totalNetCarbsG).toBe(45); // existing contract unchanged
       expect(res.mealEventId).toMatch(/^[0-9a-f-]{36}$/);
       const f = ok(res.forecast);
-      expect(f.mealAware.availability.mealsRangeOnly).toBe(1); // no insulin recorded yet
-      expect(f.mealAware.changedForecast).toBe(false); // the mean is not moved on a guess
-      expect(Math.max(...f.points.map((p) => p.high - p.adjusted))).toBeGreaterThan(100); // but the range reaches the uncovered case
-      expect(f.notes.join(' ')).toMatch(/no insulin recorded/i);
+      expect(f.preview).toBe(true);
+      expect(f.saved).toBe(false);
+      expect(f.mealAware.preview).toEqual({ mealId: res.mealEventId, insulinUnits: null });
+      // the preview counts the meal in full (no insulin yet): the line RISES, it is not a straight line
+      expect(f.mealAware.availability).toMatchObject({ mealsUsed: 1, mealsRangeOnly: 0 });
+      expect(f.mealAware.changedForecast).toBe(true);
+      expect(at(f, 120).adjusted).toBeGreaterThan(at(f, 120).baseline! + 100);
+      expect(f.notes.join(' ')).toMatch(/Preview: this meal is counted here in full but is not saved/);
+      expect(res.forecastNote).toMatch(/Preview of what this meal would do/);
+      // ...but the REAL forecast does not contain the unconfirmed meal: no line, no carbs on board, not in the logged list, no run saved
+      const real = ok(await rig.forecast.run());
+      expect(real.mealAware.events).toEqual([]);
+      expect(real.mealAware.availability.carbsOnBoardGrams).toBeNull();
+      expect(real.mealAware.changedForecast).toBe(false);
+      expect((await rig.api.recent(6)).meals).toEqual([]);
+      expect(await rig.forecast.mealCoverage(res.mealEventId!)).toBeNull();
 
       const meal = (await rig.db.query('SELECT * FROM meal_events WHERE meal_id = $1', [res.mealEventId])).rows[0];
       expect(meal).toMatchObject({
@@ -208,11 +220,12 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1);
     });
 
-    it('recording insulin afterwards turns the meal into a real adjustment', async () => {
+    it('recording insulin does nothing for an unconfirmed scan; confirming the meal turns it into a real adjustment', async () => {
       const rig = makeRig({ glucose: 130, baseline: () => 130 });
       await setTestTherapy(rig);
       const svc = mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]);
-      await svc.analyzeMeal(photo);
+      const scan = await svc.analyzeMeal(photo);
+      const mealId = (scan as { mealEventId: string }).mealEventId;
 
       const z = await rig.api.addInsulin({
         clientId: 'declared-none-1',
@@ -222,7 +235,12 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
         unitsAdministered: 0,
         source: 'manual',
       });
-      const f = ok(z.forecast);
+      const before = ok(z.forecast);
+      expect(before.mealAware.availability.mealsUsed).toBe(0); // the scan is still a draft: backing out here would leave nothing behind
+      expect(before.mealAware.changedForecast).toBe(false);
+      const confirmed = await rig.api.editMeal(mealId, { status: 'confirmed' });
+      expect(confirmed.result).toBe('updated');
+      const f = ok(confirmed.forecast);
       expect(f.mealAware.availability.mealsUsed).toBe(1);
       expect(f.mealAware.availability.insulin).toBe('confirmed_none');
       expect(f.mealAware.changedForecast).toBe(true);
@@ -514,25 +532,126 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
     });
   });
 
+  describe('unconfirmed meals never count, and the preview shows what a meal would do', () => {
+    const scan = async (rig: Rig, raw = detectedRaw): Promise<string> =>
+      ((await mealService(rig, [{ kind: 'raw', rawText: raw }]).analyzeMeal(photo)) as { mealEventId: string }).mealEventId;
+
+    it('backing out of a scan leaves the forecast, carbs on board and the logged list untouched, and does not block logging the same meal', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const before = ok(await rig.forecast.run());
+      const draftId = await scan(rig); // never confirmed: the person went back
+      const after = ok(await rig.forecast.run());
+      expect(after.mealAware.events).toEqual([]);
+      expect(after.mealAware.availability).toEqual(before.mealAware.availability);
+      expect(after.points.map((p) => p.adjusted)).toEqual(before.points.map((p) => p.adjusted));
+      expect(after.points.every((p) => p.carbsOnBoardGrams === null)).toBe(true);
+      expect((await rig.api.recent(6)).meals).toEqual([]);
+      // the abandoned draft does not trigger the probable-double-entry check either
+      const manual = await rig.api.addMeal({ clientId: 'after-backout-001', eatenAt: iso(nowSec() - 60), carbsG: 45 });
+      expect(manual.result).toBe('created');
+      // and tidying it up (cancel) is harmless
+      expect((await rig.api.editMeal(draftId, { status: 'cancelled' })).result).toBe('updated');
+    });
+
+    it('a dose named against an unconfirmed meal acts as a lone dose (it was taken) and pairs with the meal once it is confirmed', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const draftId = await scan(rig);
+      const dose = await rig.api.addInsulin({ clientId: 'dose-for-draft-001', administeredAt: iso(nowSec() - 30), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual', mealId: draftId });
+      const f = ok(dose.forecast);
+      expect(f.mealAware.events).toEqual([expect.objectContaining({ id: dose.insulin!.id, role: 'used', reason: 'dose_without_recorded_meal' })]);
+      const confirmed = ok((await rig.api.editMeal(draftId, { status: 'confirmed' })).forecast);
+      expect(confirmed.mealAware.events.find((e) => e.id === draftId)).toMatchObject({ role: 'used', reason: 'insulin_linked_declared' });
+      expect(confirmed.mealAware.events.find((e) => e.id === dose.insulin!.id)).toMatchObject({ role: 'used', reason: 'linked_to_meal' });
+    });
+
+    it('a dose named against a scan that was never confirmed pairs with the meal that WAS confirmed around it', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const abandoned = await scan(rig); // first scan, left as a draft
+      const replacement = await rig.api.addMeal({ clientId: 'replacement-0001', eatenAt: iso(nowSec() - 120), carbsG: 45 });
+      const dose = await rig.api.addInsulin({ clientId: 'dose-for-abandoned-1', administeredAt: iso(nowSec() - 30), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4.5, source: 'manual', mealId: abandoned });
+      const f = ok(dose.forecast);
+      expect(f.mealAware.events.find((e) => e.id === replacement.meal!.id)).toMatchObject({ role: 'used', reason: 'insulin_linked_auto' });
+      expect(f.mealAware.events.find((e) => e.id === dose.insulin!.id)).toMatchObject({ role: 'used', reason: 'linked_to_meal' });
+      expect(f.mealAware.availability).toMatchObject({ mealsUsed: 1, mealsRangeOnly: 0 });
+    });
+
+    it('preview: a stored draft is counted in full, saved nowhere, and changes nothing in the real forecast', async () => {
+      const rig = makeRig({ glucose: 130, baseline: () => 130 });
+      await setTestTherapy(rig);
+      const draftId = await scan(rig);
+      const runsBefore = await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId]);
+      const p = ok(await rig.forecast.preview({ mealId: draftId }));
+      expect(p).toMatchObject({ preview: true, saved: false });
+      expect(p.mealAware.preview).toEqual({ mealId: draftId, insulinUnits: null });
+      expect(p.mealAware.availability).toMatchObject({ mealsUsed: 1, mealsRangeOnly: 0 });
+      expect(p.mealAware.allLoggedCounted).toBeNull();
+      expect(at(p, 120).adjusted).toBeGreaterThan(at(p, 120).baseline! + 100); // 45 g uncovered: the line climbs
+      expect(p.points.every((pt) => pt.high >= pt.adjusted && pt.low <= pt.adjusted)).toBe(true); // uncertainty stays visible
+      expect(p.notes[0]).toMatch(/^Preview: this meal is counted here in full/);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId])).toBe(runsBefore);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM predictions WHERE user_id = $1', [rig.userId])).toBe(0); // nothing to learn from
+      // the real forecast still has no meal
+      expect(ok(await rig.forecast.run()).mealAware.events).toEqual([]);
+    });
+
+    it('preview: trying an insulin amount with the meal shows the net effect; an amount alone shows the correction; typed grams work', async () => {
+      const rig = makeRig({ glucose: 150, baseline: () => 150 });
+      await setTestTherapy(rig); // ICR 10, ISF 50
+      const draftId = await scan(rig);
+      const none = ok(await rig.forecast.preview({ mealId: draftId }));
+      const covered = ok(await rig.forecast.preview({ mealId: draftId, insulinUnits: 4.5 }));
+      expect(covered.mealAware.preview).toEqual({ mealId: draftId, insulinUnits: 4.5 });
+      expect(covered.mealAware.events.find((e) => e.id === draftId)).toMatchObject({ role: 'used' });
+      expect(at(covered, 120).adjusted).toBeLessThan(at(none, 120).adjusted - 50); // the insulin takes a large part of the rise away
+      expect(at(covered, 120).adjusted).toBeGreaterThan(at(covered, 120).baseline! - 10); // 4.5 U covers 45 g: roughly a wash after 2 h
+
+      const onlyInsulin = ok(await rig.forecast.preview({ insulinUnits: 2 }));
+      expect(onlyInsulin.mealAware.preview).toEqual({ mealId: null, insulinUnits: 2 });
+      expect(at(onlyInsulin, 60).adjusted).toBeLessThan(at(onlyInsulin, 60).baseline! - 20);
+      expect(onlyInsulin.notes[0]).toMatch(/^Preview: the insulin amount you entered/);
+
+      const typed = ok(await rig.forecast.preview({ meal: { carbsG: 30 } }));
+      expect(typed.mealAware.preview).toEqual({ mealId: 'preview-meal', insulinUnits: null });
+      expect(at(typed, 120).adjusted).toBeGreaterThan(at(typed, 120).baseline! + 60);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1); // only the scan; typed grams are never stored
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM insulin_events WHERE user_id = $1', [rig.userId])).toBe(0);
+    });
+
+    it('preview adds to what is already logged and never double counts a meal that is already confirmed', async () => {
+      const rig = makeRig({ glucose: 150, baseline: () => 150 });
+      await setTestTherapy(rig);
+      const logged = await rig.api.addMeal({ clientId: 'prev-logged-0001', eatenAt: iso(nowSec() - 300), carbsG: 40 });
+      await rig.api.addInsulin({ clientId: 'prev-logged-0002', administeredAt: iso(nowSec() - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual', mealId: logged.meal!.id });
+      const real = ok(await rig.forecast.run());
+      const again = ok(await rig.forecast.preview({ mealId: logged.meal!.id })); // already counted, with its own dose
+      expect(again.mealAware.events.filter((e) => e.type === 'meal')).toHaveLength(1);
+      expect(again.points.map((p) => p.adjusted)).toEqual(real.points.map((p) => p.adjusted)); // same line: counted once
+      const extra = ok(await rig.forecast.preview({ meal: { carbsG: 30 } }));
+      expect(extra.mealAware.events.filter((e) => e.type === 'meal')).toHaveLength(2); // the logged meal AND the previewed one
+    });
+  });
+
   describe('what-if: everything you logged counted in full', () => {
     const rigWith = (glucose = 150): Rig => makeRig({ glucose, baseline: () => glucose });
 
-    it('a dose paired with a meal that has no carbohydrates leaves the main line alone, but the what-if view shows where it leads', async () => {
+    it('a meal with no insulin record leaves the main line alone, but the what-if view shows where it leads', async () => {
       const rig = rigWith(150);
       await setTestTherapy(rig); // ICR 10, ISF 50 (test values)
-      const meal = await rig.api.addMeal({ clientId: 'wi-dose-meal-001', eatenAt: iso(nowSec() - 600) }); // no carbohydrate amount yet
-      const dose = await rig.api.addInsulin({ clientId: 'wi-dose-0000001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual', mealId: meal.meal!.id });
-      const f = ok(dose.forecast);
+      const meal = await rig.api.addMeal({ clientId: 'wi-dose-meal-001', eatenAt: iso(nowSec() - 600), carbsG: 50 });
+      const f = ok(meal.forecast);
       for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline); // main line unchanged
       const w = f.mealAware.allLoggedCounted!;
       expect(w).not.toBeNull();
       expect(w.description).toMatch(/not a prediction/);
       expect(w.points).toHaveLength(36);
       expect(w.points[0]).toEqual({ minutes: 5, time: expect.any(String), adjusted: expect.any(Number), low: expect.any(Number), high: expect.any(Number) });
-      expect(w.countedEntries).toEqual([{ id: dose.insulin!.id, type: 'insulin', reason: 'linked_meal_not_usable' }]);
-      // 2 U x ISF 50 = 100 mg/dL still to come, most of it within 2-3 hours
+      expect(w.countedEntries).toEqual([{ id: meal.meal!.id, type: 'meal', reason: 'insulin_not_recorded' }]);
+      // 50 g x CSF 5 mg/dL per g = 250 mg/dL, most of it within 2-3 hours
       const w120 = w.points.find((p) => p.minutes === 120)!;
-      expect(w120.adjusted).toBeLessThan(150 - 40);
+      expect(w120.adjusted).toBeGreaterThan(150 + 40);
       expect(w120.low).toBeLessThanOrEqual(w120.adjusted);
       expect(w120.high).toBeGreaterThanOrEqual(w120.adjusted);
       // the summary agrees with the points
@@ -541,7 +660,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(w.summary.highestMgdl).toBe(Math.max(...w.points.map((p) => p.adjusted)));
       expect(w.summary.lowestRangeEdgeMgdl).toBe(Math.min(...w.points.map((p) => p.low)));
       expect(w.summary.lowestRangeEdgeMgdl).toBeLessThanOrEqual(w.summary.lowestMgdl);
-      expect(f.notes.join(' ')).toMatch(/What-if, not a prediction: .*would fall to about \d+ mg\/dL around \+\d+ min/);
+      expect(f.notes.join(' ')).toMatch(/What-if, not a prediction: .*would rise to about \d+ mg\/dL around \+\d+ min/);
       // nothing extra is stored for the what-if: the newest stored run is the main line (no entry applied), never a what-if configuration
       expect(f.saved).toBe(true);
       expect((await rig.db.query<{ feature_config: string }>('SELECT feature_config FROM forecast_runs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [rig.userId])).rows[0]!.feature_config).toBe('glucose_only');
@@ -573,10 +692,11 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
 
       const b = rigWith();
       await setTestTherapy(b);
-      const bm = await b.api.addMeal({ clientId: 'wi-null-meal-002', eatenAt: iso(nowSec() - 600) }); // no carbohydrate amount yet
-      const bd = await b.api.addInsulin({ clientId: 'wi-null-dose-002', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual', mealId: bm.meal!.id });
-      expect(ok(bd.forecast).mealAware.allLoggedCounted).not.toBeNull();
-      expect(ok((await b.api.editInsulin(bd.insulin!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).toBeNull();
+      const bm = await b.api.addMeal({ clientId: 'wi-null-meal-002', eatenAt: iso(nowSec() - 600), carbsG: 20 });
+      expect(ok(bm.forecast).mealAware.allLoggedCounted).not.toBeNull(); // no insulin record: the line leaves it out
+      const bz = await b.api.addInsulin({ clientId: 'wi-null-zero-002', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 0, source: 'manual' });
+      expect(ok(bz.forecast).mealAware.allLoggedCounted).toBeNull(); // "I took none" counts it in full: nothing left out
+      expect(ok((await b.api.editInsulin(bz.insulin!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).not.toBeNull(); // withdrawn: back to unknown
 
       const c = rigWith();
       await setTestTherapy(c);
@@ -784,8 +904,11 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const none = await rig.api.addMeal({ clientId: 'label-meal-002', eatenAt: iso(nowSec() - 3000), carbsG: 12 });
       expect(none.meal!.label).toBeNull();
       const photoRes = await mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]).analyzeMeal(photo);
+      const photoId = (photoRes as { mealEventId: string }).mealEventId;
+      expect((await rig.api.recent(2)).meals.some((x) => x.id === photoId)).toBe(false); // an unconfirmed scan is not listed
+      await rig.api.editMeal(photoId, { status: 'confirmed' });
       const recent = await rig.api.recent(2);
-      const photoMeal = recent.meals.find((x) => x.id === (photoRes as { mealEventId: string }).mealEventId)!;
+      const photoMeal = recent.meals.find((x) => x.id === photoId)!;
       expect(photoMeal.label).toBe('steamed white rice');
     });
 

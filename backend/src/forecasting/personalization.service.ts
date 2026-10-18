@@ -6,7 +6,8 @@ import { OutcomeService } from './outcome.service.js';
 import { ParametersService } from './parameters.service.js';
 
 /**
- * SQL condition: the forecast run behind prediction alias `alias` used no entry that was LATER withdrawn (cancelled). A
+ * SQL condition: the forecast run behind prediction alias `alias` used no entry that was LATER withdrawn (cancelled) and no meal that
+ * was never confirmed (still a draft; before drafts stopped counting, forecasts could include a scan the person backed out of). A
  * person who withdraws a meal or a dose is saying it was a mistake, so forecasts that relied on it are neither trustworthy
  * training examples nor fair evidence about the event layer. The stored predictions themselves are never changed.
  */
@@ -17,7 +18,7 @@ export const NO_WITHDRAWN_EVENTS = (alias: string): string => `
       LEFT JOIN insulin_events ie ON ie.insulin_id = l.insulin_id
       LEFT JOIN insulin_events li ON li.insulin_id = l.linked_insulin_id
      WHERE l.run_id = ${alias}.run_id
-       AND (me.status = 'cancelled' OR ie.status = 'cancelled' OR li.status = 'cancelled'))`;
+       AND (me.status IN ('cancelled', 'draft') OR ie.status = 'cancelled' OR li.status = 'cancelled'))`;
 
 /** Horizons used to learn the scales: those inside the glucose-only model's measured range. */
 const FIT_HORIZONS_MIN = [60, 120];

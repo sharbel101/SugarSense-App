@@ -19,7 +19,7 @@ const doseRow = (over: Partial<InsulinRow> = {}): InsulinRow => ({
   timingUncertain: false,
   revision: 1,
   status: 'active',
-  mealCancelled: false,
+  mealNotCounted: false,
   ...over,
 });
 
@@ -39,18 +39,18 @@ describe('withdrawing entries - what the API accepts', () => {
 
 describe('withdrawing entries - a dose named against a withdrawn meal is read as if no meal had been named', () => {
   it('the engine input and the linking input drop the named meal, and only when it was withdrawn', () => {
-    const gone = buildEngineInputs({ mealRows: [], insulinRows: [doseRow({ mealCancelled: true })], resolver: null, params: DEFAULT_ENGINE_PARAMS, anchorSec: 1_792_000_000 });
+    const gone = buildEngineInputs({ mealRows: [], insulinRows: [doseRow({ mealNotCounted: true })], resolver: null, params: DEFAULT_ENGINE_PARAMS, anchorSec: 1_792_000_000 });
     expect(gone.insulin).toHaveLength(1);
     expect(gone.insulin[0]).toMatchObject({ declaredMealId: null });
     const live = buildEngineInputs({ mealRows: [], insulinRows: [doseRow()], resolver: null, params: DEFAULT_ENGINE_PARAMS, anchorSec: 1_792_000_000 });
     expect(live.insulin[0]).toMatchObject({ declaredMealId: 'm-gone' });
-    expect(toLinkable(doseRow({ mealCancelled: true })).declaredMealId).toBeNull();
+    expect(toLinkable(doseRow({ mealNotCounted: true })).declaredMealId).toBeNull();
     expect(toLinkable(doseRow()).declaredMealId).toBe('m-gone');
   });
 
   it('so a re-scanned photo works: the dose pairs with the replacement meal logged around it', () => {
     const t = 1_792_000_000;
-    const links = linkMealsToInsulin([{ id: 'replacement', tSec: t }], [toLinkable(doseRow({ mealCancelled: true, administeredAtSec: t + 30 }))]);
+    const links = linkMealsToInsulin([{ id: 'replacement', tSec: t }], [toLinkable(doseRow({ mealNotCounted: true, administeredAtSec: t + 30 }))]);
     expect(links[0]).toMatchObject({ mealId: 'replacement', status: 'linked_auto', insulinIds: ['i1'], unitsTotal: 4 });
     // while a dose that names a live meal is not borrowed by another one
     const live = linkMealsToInsulin([{ id: 'other', tSec: t }], [toLinkable(doseRow({ administeredAtSec: t + 30 }))]);
@@ -63,7 +63,7 @@ describe('withdrawing entries - learning and evidence skip forecasts that relied
     const sql = NO_WITHDRAWN_EVENTS('p');
     expect(sql).toMatch(/NOT EXISTS/);
     expect(sql).toMatch(/l\.run_id = p\.run_id/);
-    expect(sql).toMatch(/me\.status = 'cancelled'/);
+    expect(sql).toMatch(/me\.status IN \('cancelled', 'draft'\)/);
     expect(sql).toMatch(/ie\.status = 'cancelled'/);
     expect(sql).toMatch(/li\.status = 'cancelled'/);
   });

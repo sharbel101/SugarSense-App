@@ -51,8 +51,8 @@ export interface InsulinRow {
   timingUncertain: boolean;
   revision: number;
   status: 'active' | 'cancelled';
-  /** true when the meal this dose was declared against was withdrawn (cancelled). Only filled by `insulinBetween`. */
-  mealCancelled: boolean;
+  /** true when the meal this dose was named against does not count: withdrawn (cancelled) or never confirmed (draft). Only filled by `insulinBetween`. */
+  mealNotCounted: boolean;
 }
 
 type DbMeal = {
@@ -91,7 +91,7 @@ type DbInsulin = {
   timing_uncertain: boolean;
   revision: number;
   status: 'active' | 'cancelled';
-  meal_cancelled?: boolean | null;
+  meal_not_counted?: boolean | null;
 };
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
@@ -138,7 +138,7 @@ const mapInsulin = (r: DbInsulin): InsulinRow => ({
   timingUncertain: r.timing_uncertain,
   revision: r.revision,
   status: r.status,
-  mealCancelled: r.meal_cancelled === true,
+  mealNotCounted: r.meal_not_counted === true,
 });
 
 export type WriteStatus = 'created' | 'exists' | 'duplicate' | 'updated' | 'unchanged' | 'not_found' | 'conflict' | 'invalid';
@@ -183,7 +183,7 @@ export class EventsService {
       if (!input.allowDuplicate) {
         const dup = await c.query<{ meal_id: string }>(
           `SELECT meal_id FROM meal_events
-            WHERE user_id = $1 AND status <> 'cancelled'
+            WHERE user_id = $1 AND status NOT IN ('cancelled', 'draft')
               AND abs(extract(epoch FROM eaten_at - $2::timestamptz)) <= $3
               AND carbs_g IS NOT DISTINCT FROM $4::numeric
               AND client_uuid <> $5
@@ -532,11 +532,15 @@ export class EventsService {
     return r.rows[0] ? mapMeal(r.rows[0]) : null;
   }
 
-  /** Non-cancelled meals in [fromSec, toSec], oldest first. */
+  /**
+   * The meals that COUNT in [fromSec, toSec], oldest first: confirmed and manually entered ones. Never a meal that was withdrawn
+   * (cancelled) and never a DRAFT: a photo meal is a draft until the person confirms it, and backing out of the screen must leave the
+   * forecast, the carbs on board and the logged list exactly as they were.
+   */
   async mealsBetween(userId: string, fromSec: number, toSec_: number): Promise<MealRow[]> {
     const r = await this.db.query<DbMeal>(
       `SELECT ${MEAL_COLUMNS} FROM meal_events
-        WHERE user_id = $1 AND status <> 'cancelled' AND eaten_at BETWEEN $2 AND $3
+        WHERE user_id = $1 AND status NOT IN ('cancelled', 'draft') AND eaten_at BETWEEN $2 AND $3
         ORDER BY eaten_at, meal_id`,
       [userId, toIso(fromSec), toIso(toSec_)],
     );
@@ -546,7 +550,7 @@ export class EventsService {
   async insulinBetween(userId: string, fromSec: number, toSec_: number): Promise<InsulinRow[]> {
     const r = await this.db.query<DbInsulin>(
       `SELECT ${INSULIN_COLUMNS},
-              (SELECT m.status = 'cancelled' FROM meal_events m WHERE m.meal_id = insulin_events.meal_id) AS meal_cancelled
+              (SELECT m.status IN ('cancelled', 'draft') FROM meal_events m WHERE m.meal_id = insulin_events.meal_id) AS meal_not_counted
          FROM insulin_events
         WHERE user_id = $1 AND status = 'active' AND administered_at BETWEEN $2 AND $3
         ORDER BY administered_at, insulin_id`,

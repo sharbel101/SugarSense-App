@@ -67,8 +67,11 @@ export class MealForecastFlow {
           forecastNote: `This meal was not added to the forecast (${written.reason ?? 'rejected'}).`,
         };
       }
-      const forecast = await this.safeForecast();
-      return { mealEventId: written.meal?.mealId ?? null, forecast, forecastNote: forecastNoteFor(forecast) };
+      // The scan is only a DRAFT until the person confirms it: it must not count in the real forecast. What they get back is a
+      // PREVIEW of what this meal would do (counted in full, no insulin yet), so the screen can show it right away.
+      const mealId = written.meal?.mealId ?? null;
+      const forecast = mealId ? await this.safePreview(mealId) : await this.safeForecast();
+      return { mealEventId: mealId, forecast, forecastNote: forecastNoteFor(forecast) };
     } catch (err) {
       this.logger.warn(`photo flow failed after analysis ${describeDbError(err)}`);
       return {
@@ -86,6 +89,15 @@ export class MealForecastFlow {
       forecast: await this.safeForecast(),
       forecastNote: 'The photo could not be used, so the forecast does not include this meal.',
     };
+  }
+
+  private async safePreview(mealId: string): Promise<ForecastDisplay | null> {
+    try {
+      return await this.forecast.preview({ mealId });
+    } catch (err) {
+      this.logger.warn(`preview failed ${describeDbError(err)}`);
+      return null;
+    }
   }
 
   private async safeForecast(): Promise<ForecastDisplay | null> {
@@ -106,12 +118,14 @@ export function forecastNoteFor(forecast: ForecastDisplay | null): string {
   if (forecast === null) return 'Your meal is saved, but the forecast could not be refreshed just now.';
   switch (forecast.status) {
     case 'ok':
-      return 'Forecast includes this meal as an estimate. If you correct the amount, the forecast updates; your insulin entry is needed for the meal to move the central line.';
+      return forecast.preview
+        ? 'Preview of what this meal would do to your glucose, counted in full before any insulin. It is not saved, and does not count in your forecast, until you confirm it.'
+        : 'Forecast includes this meal as an estimate.';
     case 'baseline_unavailable':
-      return 'Your meal is saved. The glucose forecast is not available right now, so no forecast is drawn for it yet; it will be used as soon as the forecast is back.';
+      return 'Your meal is waiting for your confirmation. The glucose forecast is not available right now, so no forecast is drawn for it yet.';
     case 'stale':
-      return 'Your meal is saved. The latest glucose reading is too old to forecast from, so no forecast is shown.';
+      return 'Your meal is waiting for your confirmation. The latest glucose reading is too old to forecast from, so no forecast is shown.';
     default:
-      return 'Your meal is saved. Glucose is not available right now, so no forecast is shown.';
+      return 'Your meal is waiting for your confirmation. Glucose is not available right now, so no forecast is shown.';
   }
 }

@@ -270,6 +270,17 @@ describe('event layer', () => {
     expect(mealWhatIf.series.mealApplied).toEqual(confirmedNone.series.mealApplied);
   });
 
+  it('preview (forceApplyIds) counts exactly the entries named, in full, and nothing else', () => {
+    const noRecord: MealLink[] = [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }, { mealId: 'm2', status: 'none_recorded', insulinIds: [], unitsTotal: null }];
+    const meals = [meal({ id: 'm1' }), meal({ id: 'm2' })];
+    const r = layer({ meals, links: noRecord, forceApplyIds: new Set(['m2']) });
+    expect(r.dispositions.find((d) => d.id === 'm2')).toMatchObject({ role: 'applied' });
+    expect(r.dispositions.find((d) => d.id === 'm1')).toMatchObject({ role: 'scenario_only', reason: 'insulin_not_recorded' });
+    const only = layer({ meals: [meal({ id: 'm2' })], links: [noRecord[1] as MealLink], forceApplyIds: new Set(['m2']) });
+    expect(r.series.mealApplied).toEqual(only.series.mealApplied); // m1 added nothing to the mean
+    expect(Math.max(...r.series.mealApplied)).toBeGreaterThan(100);
+  });
+
   it('what-if still leaves out what has no ratio, was excluded, or has no correction factor - nothing is invented', () => {
     const noRecord: MealLink[] = [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }];
     expect(layer({ meals: [meal({ icrGPerU: null })], links: noRecord, applyAll: true }).series.mealApplied.every((v) => v === 0)).toBe(true);

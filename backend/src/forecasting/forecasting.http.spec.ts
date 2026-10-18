@@ -180,6 +180,31 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     expect(JSON.stringify(w)).not.toMatch(/icr|isf|mCsf|snapshot/i);
   });
 
+  it('POST /forecast/preview: what a meal or an insulin amount would do, nothing saved; bad input is refused', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const typed = await http.post('/forecast/preview').send({ meal: { carbsG: 40 } }).expect(200);
+    expect(typed.headers['cache-control']).toContain('no-store');
+    expect(typed.body).toMatchObject({ status: 'ok', preview: true, saved: false });
+    expect(typed.body.mealAware.preview).toEqual({ mealId: 'preview-meal', insulinUnits: null });
+    expect(typed.body.points.find((p: { minutes: number }) => p.minutes === 120).adjusted).toBeGreaterThan(130 + 60);
+    const withDose = await http.post('/forecast/preview').send({ meal: { carbsG: 40 }, insulinUnits: 4 }).expect(200);
+    expect(withDose.body.mealAware.preview.insulinUnits).toBe(4);
+    expect((await http.get('/events/recent?hours=3').expect(200)).body).toEqual({ meals: [], insulin: [] }); // nothing was stored
+
+    await http.post('/forecast/preview').send({}).expect(400);
+    await http.post('/forecast/preview').send({ meal: { carbsG: 0 } }).expect(400);
+    await http.post('/forecast/preview').send({ meal: { carbsG: 40 }, mealId: '0'.repeat(8) + '-0000-4000-8000-' + '0'.repeat(12) }).expect(400);
+    await http.post('/forecast/preview').send({ insulinAt: iso(nowSec()) }).expect(400);
+    await http.post('/forecast/preview').send({ insulinUnits: 500 }).expect(400);
+    await http.post('/forecast/preview').send({ insulinUnits: 2, secret: true }).expect(400);
+    await http.post('/forecast/preview').send({ meal: { carbsG: 40, eatenAt: iso(nowSec() + 3600) } }).expect(422);
+    await http.post('/forecast/preview').send({ mealId: '0'.repeat(8) + '-0000-4000-8000-' + '0'.repeat(12) }).expect(404);
+    const cancelled = await http.post('/events/meals').send({ clientId: 'prev-cancel-0001', eatenAt: iso(nowSec() - 300), carbsG: 20 }).expect(201);
+    await http.patch('/events/meals/' + cancelled.body.meal.id).send({ status: 'cancelled' }).expect(200);
+    await http.post('/forecast/preview').send({ mealId: cancelled.body.meal.id }).expect(404);
+  });
+
   it('time zone: saved with the settings, validated, returned, and used to read the time-of-day ratios', async () => {
     const http = request(app.getHttpServer());
     await http.put('/therapy/settings').send({ source: 'user_entered', icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], timezone: 'Mars/Olympus' }).expect(400);
@@ -253,6 +278,10 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
         expect(res.body).toEqual({ status: 'unavailable', reason: 'Saving and reading your history is not available right now.' });
         expect(JSON.stringify(res.body)).not.toMatch(/127\.0\.0\.1|ECONN|secretpw|nobody|postgres/i);
       }
+      // the preview falls back to the glucose-only forecast too, without claiming anything was previewed
+      const pv = await http.post('/forecast/preview').send({ insulinUnits: 2 }).expect(200);
+      expect(pv.body.status).toBe('ok');
+      expect(pv.body.preview).toBeUndefined();
       // the forecast itself still answers (glucose-only) rather than failing
       const f = await http.get('/forecast').expect(200);
       expect(f.body.status).toBe('ok');

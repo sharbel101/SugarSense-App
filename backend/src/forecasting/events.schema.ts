@@ -111,6 +111,42 @@ export const forecastQuerySchema = z.object({
   horizonMin: z.coerce.number().int().min(5).max(180).optional(),
 });
 
+/**
+ * "What would this do?" before anything is saved: a meal (a stored draft by id, or typed grams) and/or an insulin amount the
+ * person is considering. The preview counts them in full on top of what is already logged and saves nothing.
+ */
+export const previewSchema = z
+  .object({
+    mealId: z.uuid().optional(),
+    meal: z
+      .object({
+        carbsG: z.number().min(1).max(400).refine(oneDecimal, 'at most 1 decimal'),
+        eatenAt: isoTime.optional(),
+        fatG: grams(300).optional(),
+        proteinG: grams(300).optional(),
+        absorptionClass: z.enum(['fast', 'medium', 'slow']).optional(),
+      })
+      .strict()
+      .optional(),
+    /** Units of rapid-acting insulin to try. 0 = none taken. */
+    insulinUnits: units.optional(),
+    insulinAt: isoTime.optional(),
+    horizonMin: z.number().int().min(5).max(180).optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.mealId === undefined && v.meal === undefined && v.insulinUnits === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'give a meal (mealId or meal) and/or insulinUnits' });
+    }
+    if (v.mealId !== undefined && v.meal !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['meal'], message: 'use mealId or meal, not both' });
+    }
+    if (v.insulinAt !== undefined && v.insulinUnits === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['insulinAt'], message: 'insulinAt needs insulinUnits' });
+    }
+  });
+export type PreviewInput = z.infer<typeof previewSchema>;
+
 export const counterfactualSchema = z
   .object({
     excludeMealIds: z.array(z.uuid()).min(1).max(20),

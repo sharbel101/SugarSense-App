@@ -46,6 +46,8 @@ export interface LayerInput {
    * without an insulin record (which the normal line only uses to stretch the range). Never saved, never learned from.
    */
   applyAll?: boolean;
+  /** Preview only: count exactly these entries (a meal still being confirmed, an insulin amount being tried) in full. */
+  forceApplyIds?: ReadonlySet<string>;
 }
 
 const zeros = (n: number): number[] => Array.from({ length: n }, () => 0);
@@ -97,7 +99,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     // around it, so it is counted: the forecast adds the effects of what was logged, and which meal a dose belongs to does not
     // change that sum. Only a meal with NO insulin record at all stays out of the central line (the insulin may just not be logged yet).
     const knownCoverage =
-      input.applyAll === true || status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none' || status === 'ambiguous';
+      input.applyAll === true || input.forceApplyIds?.has(meal.id) === true || status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none' || status === 'ambiguous';
 
     const csf = (meal.isfMgdlPerU as number) / (meal.icrGPerU as number);
     const incAt = (ageMin: number, j: number): number => mealIncrement(meal, csf, ageMin, minutes[j] as number, params);
@@ -178,7 +180,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
       reason = 'dose_without_recorded_meal';
     }
 
-    if (input.applyAll === true && role === 'scenario_only') {
+    if ((input.applyAll === true || input.forceApplyIds?.has(dose.id) === true) && role === 'scenario_only') {
       role = 'applied';
       reason = 'what_if_counted';
     }

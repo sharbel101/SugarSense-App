@@ -40,7 +40,7 @@ export function sigmaFromKnots(knots: readonly [number, number][]): (minutes: nu
 }
 
 /** Pure: same RunInputs, same output. `applyAll` is the what-if view (see LayerInput); it is not part of RunInputs and is never stored. */
-export function computeRun(inputs: RunInputs, opts: { applyAll?: boolean } = {}): { layer: EventLayerResult; points: ForecastPoint[] } {
+export function computeRun(inputs: RunInputs, opts: { applyAll?: boolean; forceApplyIds?: readonly string[] } = {}): { layer: EventLayerResult; points: ForecastPoint[] } {
   const layer = computeEventLayer({
     anchorSec: inputs.anchorSec,
     horizonMin: inputs.horizonMin,
@@ -52,6 +52,7 @@ export function computeRun(inputs: RunInputs, opts: { applyAll?: boolean } = {})
     excludeMealIds: new Set(inputs.excludeMealIds),
     insulinHistory: inputs.insulinHistory,
     ...(opts.applyAll ? { applyAll: true } : {}),
+    ...(opts.forceApplyIds && opts.forceApplyIds.length > 0 ? { forceApplyIds: new Set(opts.forceApplyIds) } : {}),
   });
   const points = composeForecast({
     baseline: inputs.baseline,

@@ -87,6 +87,7 @@ tells anyone to take insulin.
 |---|---|
 | `GET /forecast?horizonMin=5..180` | Current forecast (`ForecastDisplay`, `forecast-response.ts`). Saved before its outcome is known |
 | `POST /forecast/counterfactual` `{excludeMealIds[], horizonMin?}` | What-if for a future "clear recent meals" action: those meals are left out, **delivered insulin still counts**, nothing is deleted or saved, labelled `counterfactual: true` |
+| `POST /forecast/preview` `{mealId? \| meal{carbsG, eatenAt?, fatG?, proteinG?, absorptionClass?}, insulinUnits?, insulinAt?, horizonMin?}` | **"What would this do?" before anything is saved.** The meal (a stored draft by `mealId`, or typed grams) and/or the insulin amount are counted IN FULL on top of what is logged: a meal alone shows its uncovered rise, a meal with an amount shows the net effect, an amount alone shows the correction. Answer is a normal forecast with `preview: true`, `saved: false`, `mealAware.preview {mealId, insulinUnits}` and a first note saying so. Nothing is written; nothing counts until confirmed. A what-if of the numbers typed in, never a suggestion. 400 bad body, 404 unknown/withdrawn `mealId`, 422 time in the future / older than 48 h |
 | `GET /forecast/evaluation` | Stored-outcome comparison of the layer against the glucose-only baseline, per horizon |
 | `POST /events/meals` | Manual meal (`clientId`, `eatenAt`, `carbsG?`, `fatG?`, `proteinG?`, `fiberG?`, `absorptionClass?`, ...). 201 created / 200 same `clientId` / 409 probable double entry / 422 invalid time |
 | `PATCH /events/meals/:id` | Correct a meal (`expectedRevision` for optimistic concurrency; `label`, carbs, time, speed class, `status: cancelled` to withdraw it). Records a revision and the before/after numbers. See "Withdrawn entries" |
@@ -94,7 +95,7 @@ tells anyone to take insulin.
 | `GET /events/meals/:id/coverage` | Carbohydrate vs insulin coverage under the ratio that applied at that meal |
 | `GET /events/recent?hours=` | Recent meals/insulin for a picker |
 | `GET /therapy/settings`, `GET /therapy/settings/history`, `PUT /therapy/settings` | ICR (g per unit) and ISF (mg/dL per unit) by time of day, versioned. `PUT` also accepts `timezone` (IANA name, e.g. `Asia/Beirut`): the local clock the time-of-day segments are read in |
-| `POST /meals/analyze` (existing) | Unchanged fields + `mealEventId`, `forecast`, `forecastNote` (also on failure variants) |
+| `POST /meals/analyze` (existing) | Unchanged fields + `mealEventId`, `forecast`, `forecastNote` (also on failure variants). The meal is stored as a **draft**; `forecast` is a **preview** of what it would do (see "Unconfirmed meals"), not the real forecast |
 
 `clientId` is any id of 8-80 characters `[A-Za-z0-9._-]` (the app's own event id works); resending it never creates a
 second event, including when the same request arrives twice at the same moment (the database decides, not a check-then-insert).
@@ -111,6 +112,20 @@ Meals have a short `label` (typed, or derived from the items of a photo meal, e.
 
 Responses expose display fields only: no ICR/ISF values, scales, snapshots, raw Gemini JSON, internal ids other than
 event ids, or any database detail (tests assert this).
+
+## Unconfirmed meals never count (scan -> insulin -> confirm)
+
+A photo meal is stored as a **draft** (`status: draft`). Only `PATCH /events/meals/:id {status: "confirmed"}` (or a meal entered by hand, `manual_entry`)
+makes it part of the history. A draft is **never** counted: not in the forecast line, not in carbs/insulin on board, not in `GET /events/recent`, not in
+the carbohydrate-coverage view, not in the probable-double-entry check, not as a training example. So backing out of the scan screen, a crash, or a
+lost connection leaves the forecast exactly as it was: the server enforces this, the app cannot get it wrong. An abandoned draft stays as a row (cancelling
+it is optional tidying). A dose named against a draft is read as if no meal had been named (it was taken, so it acts; it pairs with a confirmed meal
+around it, or with the draft once confirmed). Forecasts stored before this rule that counted a scan which was never confirmed are excluded from learning,
+evidence and performance (`NO_WITHDRAWN_EVENTS`).
+
+What the person sees while deciding comes from **`POST /forecast/preview`** (and the `forecast` in the `/meals/analyze` answer, which is a preview of the
+scanned meal): the meal counted in full, with the insulin amount they are considering if any. Confirming the meal and recording the insulin
+(`POST /events/insulin`, `confirmation: confirmed`) is what makes both count.
 
 ## What-if: "where would I be if everything I logged counted?" (`mealAware.allLoggedCounted`)
 

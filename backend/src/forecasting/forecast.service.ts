@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { carbCoverage, linkMealsToInsulin, type LinkableInsulin } from '../engine/coverage.js';
 import { carbSigmaG, priorBaselineSigma, type ForecastPoint } from '../engine/compose.js';
 import {
@@ -11,9 +11,10 @@ import {
 import { computeRun, hashInputs, type RunInputs } from '../engine/run.js';
 import type { EngineParams, EventDisposition, EventLayerResult, InsulinInput, MealInput, MealLink } from '../engine/types.js';
 import { DbService, describeDbError } from '../db/db.service.js';
+import type { PreviewInput } from './events.schema.js';
 import { GlucoseService } from '../glucose/glucose.service.js';
 import { BaselineErrorService } from './baseline-error.service.js';
-import { EventsService, type InsulinRow, type MealRow } from './events.service.js';
+import { EventsService, checkEventTime, type InsulinRow, type MealRow } from './events.service.js';
 import {
   ALL_LOGGED_COUNTED_DESCRIPTION,
   FORECAST_DISCLAIMER,
@@ -40,6 +41,8 @@ const ALL_COUNTED_MIN_DIFF_MGDL = 15;
 
 export interface RunOptions {
   horizonMin?: number;
+  /** Preview: a meal and/or a dose that are NOT logged (yet); they are counted in full and nothing is saved. */
+  preview?: { meal: MealRow | null; insulin: InsulinRow | null };
   /** What-if view: ignore these meals' carbohydrate effect. Insulin that was delivered stays. Never saved. */
   excludeMealIds?: string[];
   persist?: boolean;
@@ -74,6 +77,44 @@ export class ForecastService {
     @Inject(PredictionStore) private readonly store: PredictionStore,
     @Inject(PersonalizationService) private readonly personalization: PersonalizationService,
   ) {}
+
+  /**
+   * "What would this meal / this insulin amount do?", before anything is saved. The meal (a stored draft by id, or typed grams) and
+   * the insulin amount are counted IN FULL on top of what is already logged: a meal with no insulin shows its uncovered rise, a meal
+   * with the amount entered shows the net effect, an amount alone shows the correction. Nothing is written; confirming (PATCH
+   * status confirmed, POST /events/insulin) is what makes it count. A what-if of the numbers the person typed, never a suggestion.
+   */
+  async preview(input: PreviewInput): Promise<ForecastDisplay> {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const base = { horizonMin: input.horizonMin, persist: false };
+    if (!this.db.available) return this.run(base);
+    let meal: MealRow | null = null;
+    let insulin: InsulinRow | null = null;
+    try {
+      const user = await this.users.primary();
+      if (input.mealId) {
+        const row = await this.events.mealById(user.userId, input.mealId);
+        if (!row || row.status === 'cancelled') throw new NotFoundException();
+        meal = row;
+      } else if (input.meal) {
+        const t = input.meal.eatenAt ? toSec(input.meal.eatenAt) : nowSec;
+        const bad = checkEventTime(t, nowSec);
+        if (bad) throw new UnprocessableEntityException(bad);
+        meal = adHocMeal(input.meal, t);
+      }
+      if (input.insulinUnits !== undefined) {
+        const t = input.insulinAt ? toSec(input.insulinAt) : nowSec;
+        const bad = checkEventTime(t, nowSec);
+        if (bad) throw new UnprocessableEntityException(bad);
+        insulin = previewDose(input.insulinUnits, t, meal);
+      }
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      this.logger.warn('preview inputs not loaded ' + describeDbError(err));
+      return this.run(base);
+    }
+    return this.run({ ...base, nowSec, preview: { meal, insulin } });
+  }
 
   async run(opts: RunOptions = {}): Promise<ForecastDisplay> {
     const horizon = Math.min(MAX_HORIZON_MIN, Math.max(STEP_MIN, Math.floor((opts.horizonMin ?? MAX_HORIZON_MIN) / STEP_MIN) * STEP_MIN));
@@ -131,6 +172,21 @@ export class ForecastService {
       notes.push('Logged meals and insulin are not available right now, so this is the glucose-only forecast.');
     }
 
+    // Preview: the meal / dose being tried are added to what is logged and counted in full (never saved).
+    const forceApplyIds: string[] = [];
+    const previewing = opts.preview !== undefined && eventsLoaded;
+    if (opts.preview && eventsLoaded) {
+      const { meal: pm, insulin: pi } = opts.preview;
+      if (pm) {
+        mealRows = [...mealRows.filter((m) => m.mealId !== pm.mealId), pm];
+        forceApplyIds.push(pm.mealId);
+      }
+      if (pi) {
+        insulinRows = [...insulinRows, pi];
+        forceApplyIds.push(pi.insulinId);
+      }
+    }
+
     const atAnchor: ResolvedTherapy = resolver ? resolver.at(anchorSec) : unavailableTherapy();
     if (atAnchor.insulinPeakMin !== null || atAnchor.insulinDurationMin !== null) {
       const td = atAnchor.insulinDurationMin ?? params.tdMin;
@@ -156,7 +212,7 @@ export class ForecastService {
       excludeMealIds,
       insulinHistory: built.insulinHistory,
     };
-    const { layer, points } = computeRun(inputs);
+    const { layer, points } = computeRun(inputs, { forceApplyIds });
     const allDispositions = [...layer.dispositions, ...built.extraDispositions];
 
     const timeOf = (e: EventDisposition): number =>
@@ -232,7 +288,14 @@ export class ForecastService {
 
     notes.push(...buildNotes({ layer, allDispositions, atAnchor, points, counterfactual, built, eventsLoaded: eventsLoaded || !this.db.available, baselineSigmaExtrapolated: true }));
 
-    const allLoggedCounted = counterfactual ? null : buildAllLoggedCounted(inputs, points, allDispositions, anchorSec);
+    const allLoggedCounted = counterfactual || previewing ? null : buildAllLoggedCounted(inputs, points, allDispositions, anchorSec);
+    if (previewing) {
+      notes.unshift(
+        opts.preview?.meal
+          ? 'Preview: this meal is counted here in full but is not saved, and does not count in your forecast, until you confirm it.'
+          : 'Preview: the insulin amount you entered is counted here in full but is not saved until you record it.',
+      );
+    }
     if (allLoggedCounted) notes.push(allCountedNote(allLoggedCounted, points));
 
     const changed = points.some((p) => Math.abs(p.adjusted - (p.baseline ?? p.adjusted)) >= 0.05);
@@ -252,6 +315,7 @@ export class ForecastService {
         availability: availabilityView,
         events: eventDisplay,
         allLoggedCounted,
+        ...(previewing ? { preview: { mealId: opts.preview?.meal?.mealId ?? null, insulinUnits: opts.preview?.insulin?.unitsAdministered ?? null } } : {}),
       },
       models: {
         baseline: g.modelVersion,
@@ -259,6 +323,7 @@ export class ForecastService {
         eventLayerEvidence: eventsLoaded && userId ? await this.personalization.layerEvidence(userId) : { status: 'none_yet', samples: 0 },
       },
       saved,
+      ...(previewing ? { preview: true as const } : {}),
       notes: [...new Set(notes)],
       disclaimer: FORECAST_DISCLAIMER,
     };
@@ -268,8 +333,8 @@ export class ForecastService {
   async mealCoverage(mealId: string): Promise<MealCoverageView | null> {
     const user = await this.users.primary();
     const meal = await this.events.mealById(user.userId, mealId);
-    // a cancelled meal is withdrawn from the history: there is nothing to compare
-    if (!meal || meal.status === 'cancelled') return null;
+    // a cancelled meal is withdrawn from the history, and a draft is not part of it yet: there is nothing to compare
+    if (!meal || meal.status === 'cancelled' || meal.status === 'draft') return null;
     const resolver = await this.therapy.resolver(user.userId, user.timezone);
     const insulin = await this.events.insulinBetween(user.userId, meal.eatenAtSec - 3600, meal.eatenAtSec + 3600);
     const meals = await this.events.mealsBetween(user.userId, meal.eatenAtSec - 3600, meal.eatenAtSec + 3600);
@@ -333,11 +398,52 @@ const toPointDisplay = (anchorSec: number) => (p: ForecastPoint) => ({
 });
 
 /**
- * A dose the person named a meal for. When that meal was WITHDRAWN (cancelled) the naming no longer means anything - typically the
- * photo was scanned again and the first scan replaced - so the dose is read as if no meal had been named: it pairs with a meal
+ * A dose the person named a meal for. When that meal does not count - WITHDRAWN (cancelled), or never confirmed (draft) - the naming means
+ * nothing yet; typically the photo was scanned again and the first scan replaced - so the dose is read as if no meal had been named: it pairs with a meal
  * logged around it in time (the replacement), or else it is a lone dose. Either way it was taken, so it acts.
  */
-export const declaredMealOf = (i: InsulinRow): string | null => (i.mealCancelled ? null : i.mealId);
+export const declaredMealOf = (i: InsulinRow): string | null => (i.mealNotCounted ? null : i.mealId);
+
+/** A typed meal for a preview: nothing is stored. */
+const adHocMeal = (m: NonNullable<PreviewInput['meal']>, tSec: number): MealRow => ({
+  mealId: 'preview-meal',
+  clientUuid: 'preview',
+  eatenAtSec: tSec,
+  status: 'draft',
+  carbsG: m.carbsG,
+  carbsProvenance: 'user_entered',
+  fatG: m.fatG ?? null,
+  proteinG: m.proteinG ?? null,
+  fiberG: null,
+  glycemicIndex: null,
+  aiCarbsG: null,
+  aiCarbsLowG: null,
+  aiCarbsHighG: null,
+  eatenAtSource: 'user_entered',
+  timingUncertaintyMin: 0,
+  absorptionClass: m.absorptionClass ?? 'medium',
+  revision: 1,
+  userEdited: false,
+  note: null,
+  label: null,
+});
+
+/** The insulin amount being tried: rapid-acting, taken as stated, named against the previewed meal when there is one. */
+const previewDose = (units: number, tSec: number, meal: MealRow | null): InsulinRow => ({
+  insulinId: 'preview-dose',
+  clientUuid: 'preview',
+  administeredAtSec: tSec,
+  kind: meal ? 'bolus' : 'correction',
+  insulinType: null,
+  unitsAdministered: units,
+  unitsPlanned: null,
+  confirmation: 'confirmed',
+  mealId: meal ? meal.mealId : null,
+  timingUncertain: false,
+  revision: 1,
+  status: 'active',
+  mealNotCounted: false,
+});
 
 export const toLinkable = (i: InsulinRow): LinkableInsulin => ({
   id: i.insulinId,
