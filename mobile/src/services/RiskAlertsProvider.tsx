@@ -59,6 +59,19 @@ export function RiskAlertsProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
+  // The person can change the browser permission in its settings and come back: read it again on return.
+  useEffect(() => {
+    const target = globalThis as { addEventListener?: (type: string, fn: () => void) => void; removeEventListener?: (type: string, fn: () => void) => void };
+    if (!target.addEventListener || !target.removeEventListener) return;
+    const reread = () => setPermission(alertPermission());
+    target.addEventListener('focus', reread);
+    target.addEventListener('visibilitychange', reread);
+    return () => {
+      target.removeEventListener?.('focus', reread);
+      target.removeEventListener?.('visibilitychange', reread);
+    };
+  }, []);
+
   const deliver = useCallback(async (list: AlertNotification[]) => {
     if (!enabledRef.current || alertPermission() !== 'granted') return;
     for (const n of list) await showAlert(n);

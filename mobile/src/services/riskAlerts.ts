@@ -97,28 +97,23 @@ export function minutesUntil(risk: PredictedRisk, nowMs?: number): number {
   return Math.max(0, Math.round((risk.firstAtMs - from) / 60_000));
 }
 
-/** What is on board, in a few words ("10.6 U insulin, 22 g carbs on board"); '' when the server gave neither. */
-export function onBoardShort(risk: PredictedRisk): string {
-  const parts: string[] = [];
-  if (risk.insulinOnBoardUnits !== null) parts.push(`${(Math.round(risk.insulinOnBoardUnits * 10) / 10).toFixed(1)} U insulin`);
-  if (risk.carbsOnBoardGrams !== null) parts.push(`${Math.round(risk.carbsOnBoardGrams)} g carbs`);
-  return parts.length > 0 ? `${parts.join(', ')} on board` : '';
-}
-
 /**
- * The two short lines on a Safety card: what is predicted and when, then how soon and what is on board.
- * `nowMs` makes "in about ..." count from now, not from the reading.
+ * The short lines on a Safety card: what is predicted and when, the predicted value at that time and
+ * how soon, and (when it goes further) the lowest / highest predicted value. `nowMs` makes "in about
+ * ..." count from now, not from the reading.
  */
-export function riskSummary(risk: PredictedRisk, nowMs?: number): { title: string; detail: string } {
+export function riskSummary(risk: PredictedRisk, nowMs?: number): { title: string; detail: string; extreme: string } {
   const label = risk.kind === 'low' ? 'Low' : 'High';
-  const board = onBoardShort(risk);
+  const extreme = risk.kind === 'low' ? 'Lowest' : 'Highest';
+  const goesFurther = risk.extremeMinutesAhead !== risk.firstMinutesAhead && Math.abs(risk.extremeValue - risk.firstValue) >= 3;
+  const extremeLine = goesFurther ? `${extreme} about ${Math.round(risk.extremeValue)} mg/dL at ${formatTime12(new Date(risk.extremeAtMs))}` : '';
   if (risk.alreadyPast) {
-    return { title: `Reading ${Math.round(risk.latestMgdl)} is ${dirFor(risk.kind)} ${risk.threshold}`, detail: board };
+    return { title: `Reading ${Math.round(risk.latestMgdl)} is ${dirFor(risk.kind)} ${risk.threshold}`, detail: extremeLine, extreme: '' };
   }
-  const when = formatTime12(new Date(risk.firstAtMs));
   return {
-    title: `${label} predicted at ${when}`,
-    detail: [`In ${inAbout(minutesUntil(risk, nowMs))}`, board].filter(Boolean).join(' · '),
+    title: `${label} predicted at ${formatTime12(new Date(risk.firstAtMs))}`,
+    detail: `About ${Math.round(risk.firstValue)} mg/dL · in ${inAbout(minutesUntil(risk, nowMs))}`,
+    extreme: extremeLine,
   };
 }
 

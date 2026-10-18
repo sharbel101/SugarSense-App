@@ -4,6 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BackButton } from '../components/Buttons';
 import { Icon, IconName } from '../components/Icon';
+import { AlertsControlCard } from '../components/PredictedRiskCards';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { RootStackParamList } from '../navigation/types';
@@ -83,6 +84,11 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, paddingHorizontal: 4, marginTop: 8 }}>
             System follows the light or dark setting of your device.
           </Text>
+        </View>
+
+        <View>
+          <SectionTitle>Alerts</SectionTitle>
+          <AlertsControlCard />
         </View>
 
         {SECTIONS.map((section, sIndex) => (

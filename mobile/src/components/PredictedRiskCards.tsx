@@ -20,8 +20,7 @@ function useNowMs(): number {
 
 /**
  * One small Safety card per kind of predicted risk: a predicted low (forecast line below 80 mg/dL) or a
- * predicted high (above 240 mg/dL) anywhere in the next 3 hours. Tapping a card opens the graph of blood
- * sugar, insulin and carbs. Three honest states: predicted (what and when), not predicted, and not
+ * predicted high (above 240 mg/dL) anywhere in the next 3 hours. Tapping a card opens the predictions page. Three honest states: predicted (what and when), not predicted, and not
  * available (no current forecast, so nothing can be said - never shown as "all clear").
  */
 export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: () => void }) {
@@ -34,11 +33,12 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
   let tone: 'alert' | 'quiet' | 'unknown' = 'unknown';
   let title = `${name}: no forecast right now`;
   let detail = '';
+  let extreme = '';
   if (view.kind === 'ok') {
     const risk = detectPredictedRisks(view.data)[kind];
     if (risk) {
       tone = 'alert';
-      ({ title, detail } = riskSummary(risk, now));
+      ({ title, detail, extreme } = riskSummary(risk, now));
     } else {
       tone = 'quiet';
       title = `No ${name.toLowerCase()} predicted`;
@@ -54,7 +54,7 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${title}${detail ? `. ${detail}` : ''}. Opens the graph.`}
+      accessibilityLabel={`${title}${detail ? `. ${detail}` : ''}${extreme ? `. ${extreme}` : ''}. Opens the predictions.`}
       style={({ pressed }) => [
         {
           minHeight: touch.min + 8,
@@ -77,6 +77,7 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
           {title}
         </Text>
         {detail ? <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: sub, lineHeight: 20 }}>{detail}</Text> : null}
+        {extreme ? <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: sub, lineHeight: 20 }}>{extreme}</Text> : null}
       </View>
       <Icon name="chevronRight" size={16} color={tone === 'alert' ? fg : colors.ink3} />
     </Pressable>

@@ -4,7 +4,6 @@ import { parseForecastResponse } from '../src/api/forecastContract.ts';
 import {
   deserializeAlertState,
   riskSummary,
-  onBoardShort,
   detectPredictedRisks,
   evaluateRisks,
   inAbout,
@@ -75,15 +74,17 @@ test('the latest reading already past the threshold is flagged', () => {
   assert.equal(detectPredictedRisks(forecast(flat(70), { glucose: 95 })).low.alreadyPast, false);
 });
 
-test('card text is two short lines: what and when, then how soon and what is on board; wording is "predicted"', () => {
+test('card text: what and when, the predicted value then and how soon, and the lowest / highest when it goes further', () => {
   const r = detectPredictedRisks(forecast(fallingToLow)).low;
   const t = riskSummary(r);
   assert.match(t.title, /^Low predicted at \d+:\d\d (AM|PM)$/);
-  assert.equal(t.detail, 'In about 1 h 45 min · 12.2 U insulin, 28 g carbs on board');
+  assert.equal(t.detail, 'About 78 mg/dL · in about 1 h 45 min', 'the value at the first crossing (120 - 0.4 * 105 = 78)');
+  assert.match(t.extreme, /^Lowest about 48 mg\/dL at \d+:\d\d (AM|PM)$/);
   const high = riskSummary(detectPredictedRisks(forecast(risingToHigh)).high);
   assert.match(high.title, /^High predicted at/);
-  assert.ok(!/will be|you will|take /i.test(t.title + t.detail + high.title), 'no certainty or dosing words');
-  assert.ok((t.title + t.detail).length < 100, 'short enough for a small card');
+  assert.match(high.detail, /^About 245 mg\/dL · in about 2 h 5 min$/);
+  assert.match(high.extreme, /^Highest about 300 mg\/dL at/);
+  assert.ok(!/will be|you will|take /i.test(t.title + t.detail + t.extreme + high.title), 'no certainty or dosing words');
   assert.equal(inAbout(25), 'about 25 min');
   assert.equal(inAbout(170), 'about 2 h 50 min');
   assert.equal(inAbout(180), 'about 3 h');
@@ -91,14 +92,11 @@ test('card text is two short lines: what and when, then how soon and what is on 
   assert.equal(inAbout(1), 'less than 5 min');
 });
 
-test('what is on board is only what the server sent: unknown is left out, never 0', () => {
-  const both = detectPredictedRisks(forecast(flat(70), { iob: 4.26, cob: 0 })).low;
-  assert.equal(onBoardShort(both), '4.3 U insulin, 0 g carbs on board');
-  const none = detectPredictedRisks(forecast(flat(70), { iob: null, cob: null })).low;
-  assert.equal(onBoardShort(none), '');
-  assert.equal(riskSummary(none).detail, 'In about 5 min', 'the first predicted point is 5 minutes out');
-  const onlyInsulin = detectPredictedRisks(forecast(flat(70), { iob: 2, cob: null })).low;
-  assert.equal(onBoardShort(onlyInsulin), '2.0 U insulin on board');
+test('no second line when the line only just crosses (the lowest is the same point or within 3 mg/dL)', () => {
+  const r = detectPredictedRisks(forecast(flat(70))).low;
+  const t = riskSummary(r);
+  assert.equal(t.detail, 'About 70 mg/dL · in about 5 min');
+  assert.equal(t.extreme, '');
 });
 
 test('a new risk raises ONE notification; the same risk on the next readings stays quiet', () => {

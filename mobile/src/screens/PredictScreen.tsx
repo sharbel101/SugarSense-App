@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
@@ -20,9 +20,8 @@ const FORECAST_MARKS = [30, 60, 120] as const;
 
 export function PredictScreen({ navigation, route }: TabScreenProps<'Predict'>) {
   const colors = useColors();
-  // Another screen (the Safety alerts) can ask for the wear-off graph: `showGraph` is a new number each time.
-  const showGraph = route.params?.showGraph;
-  const [graphY, setGraphY] = useState<number | null>(null);
+  // Another screen (the Safety cards) can ask for the top of this page: `toTop` is a new number each time.
+  const toTop = route.params?.toTop;
   const bottomPad = useTabScreenBottomPadding();
   const { view, refresh, refreshing } = useGlucose();
   const { view: forecastView } = useForecast();
@@ -65,7 +64,7 @@ export function PredictScreen({ navigation, route }: TabScreenProps<'Predict'>) 
       <PullToRefreshScrollView
         onRefresh={refresh}
         refreshing={refreshing}
-        scrollRequest={showGraph !== undefined && graphY !== null ? { y: Math.max(0, graphY - 12), id: showGraph } : undefined}
+        scrollRequest={toTop !== undefined ? { y: 0, id: toTop } : undefined}
         contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 16 }}>
         {view.kind === 'ok' && data && chart ? (
           <>
@@ -92,11 +91,7 @@ export function PredictScreen({ navigation, route }: TabScreenProps<'Predict'>) 
               </View>
             </Card>
 
-            {mealAware ? (
-              <View onLayout={(e) => setGraphY(e.nativeEvent.layout.y)}>
-                <OnBoardChartCard data={data} />
-              </View>
-            ) : null}
+            {mealAware ? <OnBoardChartCard data={data} /> : null}
 
             {!mealAware && chart.hasBand && data.rangesAreShadow ? (
               <Chip label="Estimated ranges: shadow mode, not validated" bg={colors.amber100} color={colors.amberDark} />

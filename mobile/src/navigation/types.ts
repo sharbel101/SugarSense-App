@@ -13,8 +13,8 @@ export type ScanStackParamList = {
 
 export type TabParamList = {
   Home: undefined;
-  /** `showGraph`: any new number scrolls the page to the insulin / carbs wear-off graph. */
-  Predict: { showGraph?: number } | undefined;
+  /** `toTop`: any new number scrolls the page back to its top (e.g. when a Safety card opens it). */
+  Predict: { toTop?: number } | undefined;
   Scan: NavigatorScreenParams<ScanStackParamList>;
   Safety: undefined;
   Insights: undefined;
