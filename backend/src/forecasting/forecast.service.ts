@@ -460,6 +460,8 @@ export function isLearningEligible(
   if (insulinHistory === 'none_recorded') return false;
   if (therapy.icrStatus !== 'available' || therapy.isfMgdlPerU === null) return false;
   if (dispositions.some((d) => d.role === 'scenario_only' || d.role === 'excluded')) return false;
+  // counted in the line, but their insulin / meal relationship is a guess: never a training example
+  if (dispositions.some((d) => d.reason === 'dose_without_recorded_meal' || d.reason === 'insulin_link_ambiguous')) return false;
   if (dispositions.some((d) => d.role === 'ignored' && ['carbs_unknown', 'therapy_settings_missing', 'isf_missing', 'units_unknown'].includes(d.reason))) return false;
   const applied = new Set(dispositions.filter((d) => d.role === 'applied').map((d) => d.id));
   if (meals.some((m) => applied.has(m.id) && m.timingUncertaintyMin > 15)) return false;
@@ -581,10 +583,10 @@ function buildNotes(a: {
     notes.push('A meal has no insulin recorded. The forecast does not assume any was taken or not taken; the range is widened upward instead.');
   }
   if (reasons.has('insulin_link_ambiguous')) {
-    notes.push('A dose could belong to more than one meal, so it was not matched to either; the range is widened.');
+    notes.push('A dose could belong to more than one meal. The meals and the dose are all counted, but not matched to each other; say which meal it was for to tighten the range.');
   }
   if (reasons.has('dose_without_recorded_meal')) {
-    notes.push('An insulin dose has no meal recorded with it. It is not used for the central line; the range is widened downward.');
+    notes.push('An insulin dose has no meal recorded with it, so it is counted as lowering glucose. If it covered food you have not logged, glucose will end higher than the line; the range reaches up to the glucose-only forecast.');
   }
   if (reasons.has('linked_meal_cancelled')) {
     notes.push('An insulin dose was recorded for a meal you removed. It is not used for the central line; the range is widened downward.');

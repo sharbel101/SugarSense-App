@@ -517,18 +517,19 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
   describe('what-if: everything you logged counted in full', () => {
     const rigWith = (glucose = 150): Rig => makeRig({ glucose, baseline: () => glucose });
 
-    it('a correction logged without a meal leaves the main line alone, but the what-if view shows where it leads', async () => {
+    it('a dose whose meal was withdrawn leaves the main line alone, but the what-if view shows where it leads', async () => {
       const rig = rigWith(150);
       await setTestTherapy(rig); // ICR 10, ISF 50 (test values)
-      const dose = await rig.api.addInsulin({ clientId: 'wi-dose-0000001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
-      const f = ok(dose.forecast);
+      const meal = await rig.api.addMeal({ clientId: 'wi-dose-meal-001', eatenAt: iso(nowSec() - 600), carbsG: 20 });
+      const dose = await rig.api.addInsulin({ clientId: 'wi-dose-0000001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual', mealId: meal.meal!.id });
+      const f = ok((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled' })).forecast);
       for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline); // main line unchanged
       const w = f.mealAware.allLoggedCounted!;
       expect(w).not.toBeNull();
       expect(w.description).toMatch(/not a prediction/);
       expect(w.points).toHaveLength(36);
       expect(w.points[0]).toEqual({ minutes: 5, time: expect.any(String), adjusted: expect.any(Number), low: expect.any(Number), high: expect.any(Number) });
-      expect(w.countedEntries).toEqual([{ id: dose.insulin!.id, type: 'insulin', reason: 'dose_without_recorded_meal' }]);
+      expect(w.countedEntries).toEqual([{ id: dose.insulin!.id, type: 'insulin', reason: 'linked_meal_cancelled' }]);
       // 2 U x ISF 50 = 100 mg/dL still to come, most of it within 2-3 hours
       const w120 = w.points.find((p) => p.minutes === 120)!;
       expect(w120.adjusted).toBeLessThan(150 - 40);
@@ -541,19 +542,24 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(w.summary.lowestRangeEdgeMgdl).toBe(Math.min(...w.points.map((p) => p.low)));
       expect(w.summary.lowestRangeEdgeMgdl).toBeLessThanOrEqual(w.summary.lowestMgdl);
       expect(f.notes.join(' ')).toMatch(/What-if, not a prediction: .*would fall to about \d+ mg\/dL around \+\d+ min/);
-      // nothing extra is stored for the what-if: one run, stored as the main line (no entry applied), never as a what-if configuration
+      // nothing extra is stored for the what-if: the newest stored run is the main line (no entry applied), never a what-if configuration
       expect(f.saved).toBe(true);
-      expect(await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId])).toBe(1);
-      expect(await count(rig, "SELECT COUNT(*) AS n FROM predictions WHERE user_id = $1 AND feature_config <> 'glucose_only'", [rig.userId])).toBe(0);
+      expect((await rig.db.query<{ feature_config: string }>('SELECT feature_config FROM forecast_runs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [rig.userId])).rows[0]!.feature_config).toBe('glucose_only');
     });
 
-    it('the same dose logged as a correction is already in the main line, so there is nothing separate to show', async () => {
+    it.each(['bolus', 'correction'] as const)('a dose logged as "%s" with no meal is in the main line itself, so there is nothing separate to show', async (kind) => {
       const rig = rigWith(150);
       await setTestTherapy(rig);
-      const c = await rig.api.addInsulin({ clientId: 'wi-corr-0000001', administeredAt: iso(nowSec() - 600), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      const c = await rig.api.addInsulin({ clientId: `wi-lone-dose-${kind}`, administeredAt: iso(nowSec() - 600), kind, confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
       const f = ok(c.forecast);
       expect(f.mealAware.allLoggedCounted).toBeNull();
-      expect(at(f, 120).adjusted).toBeLessThan(150 - 40); // the main line itself moves
+      expect(at(f, 120).adjusted).toBeLessThan(150 - 40); // the main line itself moves: 2 U x ISF 50 still to come
+      expect(f.mealAware.changedForecast).toBe(true);
+      expect(f.mealAware.events[0]).toMatchObject({ id: c.insulin!.id, type: 'insulin', role: 'used', reason: kind === 'bolus' ? 'dose_without_recorded_meal' : 'correction_dose' });
+      expect(f.mealAware.availability).toMatchObject({ insulinDosesUsed: 1, insulinDosesRangeOnly: 0 });
+      // the glucose-only value stays inside the range: if the dose covered food that was never logged, glucose ends higher
+      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.high).toBeGreaterThanOrEqual(p.baseline!);
+      if (kind === 'bolus') expect(f.notes.join(' ')).toMatch(/no meal recorded with it, so it is counted as lowering glucose/);
     });
 
     it('is absent when nothing is left out of the main line: nothing logged, a meal with its dose, a withdrawn dose, a dose that finished acting', async () => {
@@ -567,22 +573,35 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
 
       const b = rigWith();
       await setTestTherapy(b);
-      const lonely = await b.api.addInsulin({ clientId: 'wi-null-dose-002', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
-      expect(ok(lonely.forecast).mealAware.allLoggedCounted).not.toBeNull();
-      expect(ok((await b.api.editInsulin(lonely.insulin!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).toBeNull();
+      const bm = await b.api.addMeal({ clientId: 'wi-null-meal-002', eatenAt: iso(nowSec() - 600), carbsG: 20 });
+      const bd = await b.api.addInsulin({ clientId: 'wi-null-dose-002', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual', mealId: bm.meal!.id });
+      expect(ok((await b.api.editMeal(bm.meal!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).not.toBeNull();
+      expect(ok((await b.api.editInsulin(bd.insulin!.id, { status: 'cancelled' })).forecast).mealAware.allLoggedCounted).toBeNull();
 
       const c = rigWith();
       await setTestTherapy(c);
       const old = await c.api.addInsulin({ clientId: 'wi-null-dose-003', administeredAt: iso(nowSec() - 7 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual' });
       expect(ok(old.forecast).mealAware.allLoggedCounted).toBeNull(); // 7 h ago: nothing left to act, so nothing would change
 
-      // a small leftover (1 U taken 4 h ago still has ~2 mg/dL to give) is within the forecast's own noise: no second line
+      // a small leftover (20 g eaten 4 h ago, no insulin record, still has ~2 mg/dL to give) is within the forecast's own noise: no second line
       const small = rigWith();
       await setTestTherapy(small);
-      const leftover = await small.api.addInsulin({ clientId: 'wi-null-dose-004', administeredAt: iso(nowSec() - 4 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 1, source: 'manual' });
+      const leftover = await small.api.addMeal({ clientId: 'wi-null-meal-004', eatenAt: iso(nowSec() - 4 * 3600), carbsG: 20 });
       const lf = ok(leftover.forecast);
-      expect(lf.mealAware.availability.insulinDosesRangeOnly).toBe(1);
+      expect(lf.mealAware.availability.mealsRangeOnly).toBe(1);
       expect(lf.mealAware.allLoggedCounted).toBeNull();
+    });
+
+    it('a lone dose is counted in the line but is never a training example; a declared correction still is (control)', async () => {
+      const eligible = async (rig: Rig): Promise<string> => (await rig.db.query<{ e: string }>("SELECT input_snapshot->>'eligible' AS e FROM forecast_runs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1", [rig.userId])).rows[0]!.e;
+      const lone = rigWith(150);
+      await setTestTherapy(lone);
+      await lone.api.addInsulin({ clientId: 'wi-elig-lone-0001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      expect(await eligible(lone)).toBe('false');
+      const corr = rigWith(150);
+      await setTestTherapy(corr);
+      await corr.api.addInsulin({ clientId: 'wi-elig-corr-0001', administeredAt: iso(nowSec() - 600), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      expect(await eligible(corr)).toBe('true');
     });
 
     it('a meal with no insulin record: main line unchanged, the what-if view shows the uncovered rise; a what-if with meals left out shows none', async () => {
@@ -666,7 +685,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(links).toEqual([{ meal_id: null, insulin_id: dose.insulin!.id, role: 'scenario_only', role_reason: 'linked_meal_cancelled' }]);
     });
 
-    it('a dose matched to its meal only by time is read as "dose without a recorded meal" once the meal is withdrawn', async () => {
+    it('a dose matched to its meal only by time becomes a lone dose once the meal is withdrawn, and still acts (it was taken)', async () => {
       const rig = makeRig({ glucose: 150, baseline: (m) => 150 + m / 10 });
       await setTestTherapy(rig);
       const when = iso(nowSec() - 300);
@@ -674,8 +693,9 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       const dose = await rig.api.addInsulin({ clientId: 'wd-auto-dose-001', administeredAt: when, kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual' });
       expect(ok(dose.forecast).mealAware.availability).toMatchObject({ mealsUsed: 1, insulinDosesUsed: 1 });
       const f = ok((await rig.api.editMeal(meal.meal!.id, { status: 'cancelled' })).forecast);
-      expect(f.mealAware.events[0]).toMatchObject({ id: dose.insulin!.id, role: 'range_only', reason: 'dose_without_recorded_meal' });
-      for (const p of f.points.filter((x) => x.minutes <= 120)) expect(p.adjusted).toBe(p.baseline);
+      expect(f.mealAware.events).toHaveLength(1);
+      expect(f.mealAware.events[0]).toMatchObject({ id: dose.insulin!.id, role: 'used', reason: 'dose_without_recorded_meal' });
+      expect(at(f, 60).adjusted).toBeLessThan(at(f, 60).baseline! - 20); // 6 U x ISF 50 still to come, and no carbohydrate left to offset it
     });
 
     it('a withdrawn "I took none" record no longer says that insulin was confirmed absent', async () => {
@@ -1035,7 +1055,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       expect(Number(doseLink.insulin_units)).toBe(4);
     });
 
-    it('E. an ambiguous dose, a non-rapid insulin and a basal entry are never matched to a meal', async () => {
+    it('E. an ambiguous dose is matched to neither meal but counts with both; a non-rapid insulin and a basal entry never count', async () => {
       const rig = makeRig({ glucose: 130, baseline: () => 130 });
       await setTestTherapy(rig);
       const t = nowSec();
@@ -1045,10 +1065,15 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       await rig.api.addInsulin({ clientId: 'amb-long-0001', administeredAt: iso(t - 300), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 20, source: 'manual', insulinType: 'long' });
       const basal = await rig.api.addInsulin({ clientId: 'amb-basal-001', administeredAt: iso(t - 290), kind: 'basal', confirmation: 'confirmed', unitsAdministered: 18, source: 'manual' });
       const f = ok(basal.forecast);
-      expect(f.mealAware.availability.mealsRangeOnly).toBe(2);
-      expect(f.mealAware.availability.mealsUsed).toBe(0);
-      expect(f.mealAware.changedForecast).toBe(false);
+      expect(f.mealAware.availability.mealsRangeOnly).toBe(0);
+      expect(f.mealAware.availability.mealsUsed).toBe(2); // insulin is recorded around them: both meals count
+      expect(f.mealAware.availability).toMatchObject({ insulinDosesUsed: 1, insulinDosesRangeOnly: 0 });
       expect(f.mealAware.events.filter((e) => e.type === 'meal').map((e) => e.reason)).toEqual(['insulin_link_ambiguous', 'insulin_link_ambiguous']);
+      expect(f.mealAware.events.filter((e) => e.type === 'meal').every((e) => e.role === 'used')).toBe(true);
+      expect(f.notes.join(' ')).toMatch(/counted, but not matched to each other/);
+      // the 20 g long-acting and the 18 U basal never act: only the 4 U rapid dose and the two meals do
+      expect(f.mealAware.events.find((e) => e.reason === 'not_rapid_acting')!.role).toBe('not_used');
+      expect(f.mealAware.events.find((e) => e.reason === 'not_a_meal_bolus')!.role).toBe('not_used');
       expect(f.mealAware.events.filter((e) => e.type === 'insulin').map((e) => e.reason).sort()).toEqual(['dose_without_recorded_meal', 'not_a_meal_bolus', 'not_rapid_acting']);
     });
 

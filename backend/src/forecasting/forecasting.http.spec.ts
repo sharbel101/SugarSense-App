@@ -168,11 +168,14 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     const http = request(app.getHttpServer());
     const none = await http.get('/forecast').expect(200);
     expect(none.body.mealAware.allLoggedCounted).toBeNull();
-    await http.post('/events/insulin').send({ clientId: 'wi-http-dose-001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual' }).expect(201);
+    // a lone dose is in the main line itself (nothing separate to show); a meal with no insulin record is what the what-if view is for
+    await http.post('/events/insulin').send({ clientId: 'wi-http-dose-001', administeredAt: iso(nowSec() - 3 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual' }).expect(201);
+    expect((await http.get('/forecast').expect(200)).body.mealAware.allLoggedCounted).toBeNull();
+    await http.post('/events/meals').send({ clientId: 'wi-http-meal-001', eatenAt: iso(nowSec() - 300), carbsG: 50 }).expect(201);
     const f = await http.get('/forecast').expect(200);
     const w = f.body.mealAware.allLoggedCounted;
     expect(w.points).toHaveLength(36);
-    expect(w.summary.lowestMgdl).toBeLessThan(f.body.points.find((p: { minutes: number }) => p.minutes === 120).adjusted);
+    expect(w.summary.highestMgdl).toBeGreaterThan(f.body.points.find((p: { minutes: number }) => p.minutes === 120).adjusted + 50);
     expect(w.countedEntries).toHaveLength(1);
     expect(JSON.stringify(w)).not.toMatch(/icr|isf|mCsf|snapshot/i);
   });

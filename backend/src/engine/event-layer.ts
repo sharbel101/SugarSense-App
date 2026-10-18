@@ -93,7 +93,11 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     }
     const link = linkByMeal.get(meal.id);
     const status = link?.status ?? 'none_recorded';
-    const knownCoverage = input.applyAll === true || status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none';
+    // An AMBIGUOUS meal (a dose that could belong to it or to another meal, or contradicting records) still has insulin recorded
+    // around it, so it is counted: the forecast adds the effects of what was logged, and which meal a dose belongs to does not
+    // change that sum. Only a meal with NO insulin record at all stays out of the central line (the insulin may just not be logged yet).
+    const knownCoverage =
+      input.applyAll === true || status === 'linked_declared' || status === 'linked_auto' || status === 'confirmed_none' || status === 'ambiguous';
 
     const csf = (meal.isfMgdlPerU as number) / (meal.icrGPerU as number);
     const incAt = (ageMin: number, j: number): number => mealIncrement(meal, csf, ageMin, minutes[j] as number, params);
@@ -117,8 +121,8 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
           varFp[j] = (varFp[j] as number) + (FAT_PROTEIN.amplitudeSdFactor * csf * fpMax * dF) ** 2;
         }
       } else {
-        // Insulin unknown or ambiguous: the mean is NOT moved. The uncovered-carbohydrate path is the
-        // upper end of the plausible range, so the band is stretched to reach it.
+        // No insulin record at all around this meal: the mean is NOT moved (it may simply not be logged yet). The
+        // uncovered-carbohydrate path is the upper end of the plausible range, so the band is stretched to reach it.
         scenarioUp[j] = (scenarioUp[j] as number) + params.mCsf * inc;
       }
     }
@@ -130,13 +134,13 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
           TREND_SLOPE_WINDOW_MIN;
       }
       appliedMeals += 1;
-      dispositions.push({ eventType: 'meal', id: meal.id, role: 'applied', reason: `insulin_${status}` });
+      dispositions.push({ eventType: 'meal', id: meal.id, role: 'applied', reason: status === 'ambiguous' ? 'insulin_link_ambiguous' : `insulin_${status}` });
     } else {
       dispositions.push({
         eventType: 'meal',
         id: meal.id,
         role: 'scenario_only',
-        reason: status === 'ambiguous' ? 'insulin_link_ambiguous' : 'insulin_not_recorded',
+        reason: 'insulin_not_recorded',
       });
     }
   }
@@ -172,7 +176,10 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
       role = 'applied';
       reason = 'correction_dose';
     } else {
-      role = 'scenario_only';
+      // A delivered dose with no meal recorded (a correction logged "with a meal", a snack bolus, a dose whose meal is not logged yet)
+      // lowers glucose like any other dose, so it is counted in the central line. If it covered food that was never logged the glucose
+      // will end higher; the range always reaches up to the glucose-only line for that case. Not a training example (see isLearningEligible).
+      role = 'applied';
       reason = 'dose_without_recorded_meal';
     }
 

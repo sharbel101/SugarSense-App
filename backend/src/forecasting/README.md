@@ -64,8 +64,8 @@ adjusted(h) = baseline(h) + m_csf * CSF * C * [F(age+h) - F(age)]  -  m_isf * IS
 | Meal logged, **no insulin record** | Mean unchanged; band stretched upward to the uncovered-carbohydrate case. Not "no insulin taken" |
 | Meal + explicit confirmed 0-unit entry | "Confirmed none": full carbohydrate effect applied |
 | Meal + dose declared or exactly one rapid bolus in [-30, +20] min | Both applied (carbs and insulin) |
-| Dose that could belong to two meals | Linked to neither; both meals range-only; dose range-only |
-| Bolus with no meal recorded | Mean unchanged; band stretched downward. A *correction* dose lowers the mean |
+| Dose that could belong to two meals (or contradicting "took none" + a dose) | Linked to neither, but the meals AND the dose are all counted in the line (insulin is recorded around them; which meal a dose belongs to does not change the sum). Reason `insulin_link_ambiguous`, role `used`; not a training example |
+| Dose with no meal recorded (a correction logged "with a meal", a snack bolus, a meal not logged yet) | **Counted in the line**: it lowers glucose like any dose (reason `dose_without_recorded_meal`, role `used`; kind `correction` is `correction_dose`). If it covered food that was never logged, glucose ends higher; the range always reaches up to the glucose-only value. Not a training example. (Until 2026-10-18 this case only widened the range; changed because a person who took insulin wants to see its effect in the prediction.) |
 | Planned dose | Never counted until recorded as taken (`confirmation: planned` cannot hold an administered amount) |
 | Basal, long/short/other insulin | Never used as a meal bolus |
 | ICR or ISF not set | Meals ignored (`therapy_settings_missing`), glucose-only forecast, note says so. **No default ratio** |
@@ -114,9 +114,10 @@ event ids, or any database detail (tests assert this).
 
 ## What-if: "where would I be if everything I logged counted?" (`mealAware.allLoggedCounted`)
 
-The main line deliberately does **not** move for a dose with no meal recorded (it may cover a meal not logged yet) or for a meal with no
-insulin record (the insulin may not be logged yet); it only stretches the range. That hides the effect of, for example, a correction that
-was logged "with a meal" but without a meal. `allLoggedCounted` answers it separately, without changing the main line:
+The main line counts every delivered dose and every meal that has insulin recorded around it, but deliberately does **not** move for a meal
+with no insulin record at all (the insulin may just not be logged yet; the range stretches upward instead), for a dose whose meal was
+withdrawn, or for a dose paired with a meal that has no carbohydrates. `allLoggedCounted` shows where the line would go if those were counted
+too, separately, without changing the main line:
 
 * The same engine, with every logged delivered dose and every logged meal counted in full (`applyAll`, reason `what_if_counted`) and
   nothing else eaten or taken. Still left out, because nothing may be invented: planned doses, basal/long-acting insulin, meals without
@@ -141,7 +142,7 @@ the row and its revision history stay. A withdrawn entry is ignored everywhere:
   are kept unchanged (history is never rewritten).
 * **Linking:** a withdrawn meal is not offered to any dose. A dose that was declared against a withdrawn meal is read as "taken for a meal that
   no longer exists" (`linked_meal_cancelled`, any kind): it does **not** move the central line, widens the band downward, and still counts as
-  insulin on board because it was taken. A dose matched only by time becomes "dose without a recorded meal" (same effect).
+  insulin on board because it was taken. A dose matched only by time becomes a lone dose ("dose without a recorded meal") and keeps acting, because it was taken.
 * **Learning, evidence, performance:** forecasts made earlier from a run that used an entry which was LATER withdrawn (the meal, a dose, or the
   dose linked to a meal) are excluded from the scale fitting, from `models.eventLayerEvidence` / `GET /forecast/evaluation` and from
   `model_performance` (`NO_WITHDRAWN_EVENTS` in `personalization.service.ts`). A withdrawn entry is never a trustworthy training event.

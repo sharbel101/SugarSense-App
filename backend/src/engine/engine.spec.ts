@@ -227,11 +227,25 @@ describe('event layer', () => {
     expect(r.iobU).toBe(0);
   });
 
-  it('an unlinked meal bolus does not lower the mean; the band is stretched downward', () => {
+  it('a dose with no recorded meal lowers the central line like a correction (it was taken); it is never a training example reason', () => {
     const r = layer({ insulin: [dose()], insulinHistory: 'logged' });
-    expect(r.series.insulinApplied.every((v) => v === 0)).toBe(true);
-    expect(Math.max(...r.series.scenarioDown)).toBeGreaterThan(100);
-    expect(r.dispositions[0]).toMatchObject({ role: 'scenario_only', reason: 'dose_without_recorded_meal' });
+    const asCorrection = layer({ insulin: [dose({ kind: 'correction' })], insulinHistory: 'logged' });
+    expect(r.series.insulinApplied).toEqual(asCorrection.series.insulinApplied);
+    expect(Math.max(...r.series.insulinApplied)).toBeGreaterThan(100);
+    expect(r.series.scenarioDown.every((v) => v === 0)).toBe(true);
+    expect(r.dispositions[0]).toMatchObject({ role: 'applied', reason: 'dose_without_recorded_meal' });
+    expect(r.featureConfig).toBe('insulin_only');
+  });
+
+  it('an AMBIGUOUS meal is counted (insulin is recorded around it); only a meal with no insulin record stays out of the line', () => {
+    const ambiguous: MealLink[] = [{ mealId: 'm1', status: 'ambiguous', insulinIds: [], unitsTotal: null }];
+    const r = layer({ meals: [meal()], insulin: [dose()], links: ambiguous, insulinHistory: 'logged' });
+    expect(r.dispositions.find((d) => d.id === 'm1')).toMatchObject({ role: 'applied', reason: 'insulin_link_ambiguous' });
+    expect(Math.max(...r.series.mealApplied)).toBeGreaterThan(100);
+    expect(r.series.scenarioUp.every((v) => v === 0)).toBe(true);
+    const none = layer({ meals: [meal()], links: [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }], insulinHistory: 'logged' });
+    expect(none.dispositions[0]).toMatchObject({ role: 'scenario_only', reason: 'insulin_not_recorded' });
+    expect(none.series.mealApplied.every((v) => v === 0)).toBe(true);
   });
 
   it('a correction dose lowers the mean through the insulin kernel', () => {
@@ -249,10 +263,10 @@ describe('event layer', () => {
     expect(r.iobU).toBeGreaterThan(0); // it was still taken: it stays in the insulin-on-board count
   });
 
-  it('what-if (applyAll) counts a dose with no recorded meal and a meal with no insulin record in full', () => {
-    const lonely = layer({ insulin: [dose()], insulinHistory: 'logged' });
-    expect(lonely.series.insulinApplied.every((v) => v === 0)).toBe(true); // the normal line leaves it out
-    const whatIf = layer({ insulin: [dose()], insulinHistory: 'logged', applyAll: true });
+  it('what-if (applyAll) counts a dose whose meal was withdrawn and a meal with no insulin record in full', () => {
+    const withdrawn = layer({ insulin: [dose({ declaredMealCancelled: true })], insulinHistory: 'logged' });
+    expect(withdrawn.series.insulinApplied.every((v) => v === 0)).toBe(true); // the normal line leaves it out
+    const whatIf = layer({ insulin: [dose({ declaredMealCancelled: true })], insulinHistory: 'logged', applyAll: true });
     const asCorrection = layer({ insulin: [dose({ kind: 'correction' })], insulinHistory: 'logged' });
     expect(whatIf.series.insulinApplied).toEqual(asCorrection.series.insulinApplied);
     expect(whatIf.dispositions[0]).toMatchObject({ role: 'applied', reason: 'what_if_counted' });
