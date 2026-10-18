@@ -155,12 +155,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     const linkedMealId = mealByInsulin.get(dose.id) ?? dose.declaredMealId;
     let role: 'applied' | 'scenario_only';
     let reason: string;
-    if (dose.declaredMealCancelled) {
-      // The meal it was taken for was withdrawn. The dose was still taken, so it stays in the insulin-on-board count and
-      // widens the band downward, but it must not pull the central line down (kind makes no difference).
-      role = 'scenario_only';
-      reason = 'linked_meal_cancelled';
-    } else if (linkedMealId !== null && linkedMealId !== undefined && mealById.has(linkedMealId)) {
+    if (linkedMealId !== null && linkedMealId !== undefined && mealById.has(linkedMealId)) {
       const meal = mealById.get(linkedMealId) as MealInput;
       if (input.excludeMealIds.has(meal.id)) {
         role = 'applied';

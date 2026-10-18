@@ -254,22 +254,14 @@ describe('event layer', () => {
     expect(at(r, 120, 'insulinEffect')).toBeCloseTo(50 * 2 * (insulinCumulativeAction(120, 75, 300)), 6);
   });
 
-  it.each(['bolus', 'correction'] as const)('a %s dose declared against a WITHDRAWN meal never lowers the mean, whatever its kind', (kind) => {
-    const r = layer({ insulin: [dose({ kind, declaredMealCancelled: true })], insulinHistory: 'logged' });
-    expect(r.series.insulinApplied.every((v) => v === 0)).toBe(true);
-    expect(Math.max(...r.series.scenarioDown)).toBeGreaterThan(100); // the band is stretched downward instead
-    expect(r.dispositions[0]).toMatchObject({ role: 'scenario_only', reason: 'linked_meal_cancelled' });
-    expect(r.appliedInsulin).toBe(0);
-    expect(r.iobU).toBeGreaterThan(0); // it was still taken: it stays in the insulin-on-board count
-  });
-
-  it('what-if (applyAll) counts a dose whose meal was withdrawn and a meal with no insulin record in full', () => {
-    const withdrawn = layer({ insulin: [dose({ declaredMealCancelled: true })], insulinHistory: 'logged' });
-    expect(withdrawn.series.insulinApplied.every((v) => v === 0)).toBe(true); // the normal line leaves it out
-    const whatIf = layer({ insulin: [dose({ declaredMealCancelled: true })], insulinHistory: 'logged', applyAll: true });
+  it('what-if (applyAll) counts a dose paired with a meal that has no carbohydrates, and a meal with no insulin record, in full', () => {
+    const unknownCarbs = { meals: [meal({ carbsG: null, carbsSigmaG: null, provenance: null })], insulin: [dose()], links: [linked()], insulinHistory: 'logged' as const };
+    const left = layer(unknownCarbs);
+    expect(left.series.insulinApplied.every((v) => v === 0)).toBe(true); // the normal line leaves it out
+    const whatIf = layer({ ...unknownCarbs, applyAll: true });
     const asCorrection = layer({ insulin: [dose({ kind: 'correction' })], insulinHistory: 'logged' });
     expect(whatIf.series.insulinApplied).toEqual(asCorrection.series.insulinApplied);
-    expect(whatIf.dispositions[0]).toMatchObject({ role: 'applied', reason: 'what_if_counted' });
+    expect(whatIf.dispositions.find((d) => d.id === 'i1')).toMatchObject({ role: 'applied', reason: 'what_if_counted' });
 
     const noRecord: MealLink[] = [{ mealId: 'm1', status: 'none_recorded', insulinIds: [], unitsTotal: null }];
     expect(layer({ meals: [meal()], links: noRecord }).series.mealApplied.every((v) => v === 0)).toBe(true);

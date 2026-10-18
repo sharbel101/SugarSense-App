@@ -115,9 +115,8 @@ event ids, or any database detail (tests assert this).
 ## What-if: "where would I be if everything I logged counted?" (`mealAware.allLoggedCounted`)
 
 The main line counts every delivered dose and every meal that has insulin recorded around it, but deliberately does **not** move for a meal
-with no insulin record at all (the insulin may just not be logged yet; the range stretches upward instead), for a dose whose meal was
-withdrawn, or for a dose paired with a meal that has no carbohydrates. `allLoggedCounted` shows where the line would go if those were counted
-too, separately, without changing the main line:
+with no insulin record at all (the insulin may just not be logged yet; the range stretches upward instead), or for a dose paired with a meal that
+has no carbohydrates. `allLoggedCounted` shows where the line would go if those were counted too, separately, without changing the main line:
 
 * The same engine, with every logged delivered dose and every logged meal counted in full (`applyAll`, reason `what_if_counted`) and
   nothing else eaten or taken. Still left out, because nothing may be invented: planned doses, basal/long-acting insulin, meals without
@@ -140,9 +139,7 @@ the row and its revision history stay. A withdrawn entry is ignored everywhere:
   withdrawn "I took none" record no longer says insulin was confirmed absent: the meal is range-only again).
 * **New runs:** `forecast_runs` and `prediction_event_links` of runs made after the withdrawal contain no row for it. Older runs that used it
   are kept unchanged (history is never rewritten).
-* **Linking:** a withdrawn meal is not offered to any dose. A dose that was declared against a withdrawn meal is read as "taken for a meal that
-  no longer exists" (`linked_meal_cancelled`, any kind): it does **not** move the central line, widens the band downward, and still counts as
-  insulin on board because it was taken. A dose matched only by time becomes a lone dose ("dose without a recorded meal") and keeps acting, because it was taken.
+* **Linking:** a withdrawn meal is not offered to any dose. A dose that was NAMED against a withdrawn meal (typically a photo that was scanned again and the first scan replaced) is read as if no meal had been named: it pairs with a meal logged around it in time (the replacement), or else it is a lone dose. Either way it was taken, so it acts and stays in the insulin-on-board count (`declaredMealOf` in `forecast.service.ts`).
 * **Learning, evidence, performance:** forecasts made earlier from a run that used an entry which was LATER withdrawn (the meal, a dose, or the
   dose linked to a meal) are excluded from the scale fitting, from `models.eventLayerEvidence` / `GET /forecast/evaluation` and from
   `model_performance` (`NO_WITHDRAWN_EVENTS` in `personalization.service.ts`). A withdrawn entry is never a trustworthy training event.

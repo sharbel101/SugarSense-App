@@ -332,13 +332,20 @@ const toPointDisplay = (anchorSec: number) => (p: ForecastPoint) => ({
   carbsOnBoardGrams: p.carbsOnBoardGrams,
 });
 
+/**
+ * A dose the person named a meal for. When that meal was WITHDRAWN (cancelled) the naming no longer means anything - typically the
+ * photo was scanned again and the first scan replaced - so the dose is read as if no meal had been named: it pairs with a meal
+ * logged around it in time (the replacement), or else it is a lone dose. Either way it was taken, so it acts.
+ */
+export const declaredMealOf = (i: InsulinRow): string | null => (i.mealCancelled ? null : i.mealId);
+
 export const toLinkable = (i: InsulinRow): LinkableInsulin => ({
   id: i.insulinId,
   tSec: i.administeredAtSec,
   unitsAdministered: i.unitsAdministered,
   kind: i.kind,
   confirmation: i.confirmation,
-  declaredMealId: i.mealId,
+  declaredMealId: declaredMealOf(i),
   rapidActing: isRapidActing(i.insulinType),
 });
 
@@ -423,8 +430,7 @@ export function buildEngineInputs(a: {
         ultraRapid: i.insulinType === 'ultra_rapid' || (i.insulinType === null && t.insulinType === 'ultra_rapid'),
         uncertain: i.confirmation === 'uncertain' || i.timingUncertain,
         isfMgdlPerU: t.isfMgdlPerU,
-        declaredMealId: i.mealId,
-        ...(i.mealCancelled ? { declaredMealCancelled: true } : {}),
+        declaredMealId: declaredMealOf(i),
       });
     }
   }
@@ -587,9 +593,6 @@ function buildNotes(a: {
   }
   if (reasons.has('dose_without_recorded_meal')) {
     notes.push('An insulin dose has no meal recorded with it, so it is counted as lowering glucose. If it covered food you have not logged, glucose will end higher than the line; the range reaches up to the glucose-only forecast.');
-  }
-  if (reasons.has('linked_meal_cancelled')) {
-    notes.push('An insulin dose was recorded for a meal you removed. It is not used for the central line; the range is widened downward.');
   }
   if (reasons.has('planned_not_delivered')) notes.push('A planned dose is not counted until you record that it was taken.');
   if (reasons.has('not_a_meal_bolus')) notes.push('Basal and other non-meal insulin entries are not used as a meal dose.');

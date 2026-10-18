@@ -45,9 +45,8 @@ export interface InsulinInput {
   /** true when the user marked the dose or its timing as uncertain. */
   uncertain: boolean;
   isfMgdlPerU: number | null;
+  /** Meal the person named for this dose; null when none, or when the named meal was withdrawn (see buildEngineInputs). */
   declaredMealId: string | null;
-  /** true when the meal this dose was declared against was withdrawn: the dose then has no meal to cover. */
-  declaredMealCancelled?: boolean;
 }
 
 export interface MealLink {
