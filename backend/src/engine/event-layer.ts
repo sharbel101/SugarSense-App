@@ -1,3 +1,4 @@
+import { profileCumulative } from './absorption.js';
 import { insulinCumulativeAction, insulinRemainingFraction, mealCumulativeAbsorption } from './kernels.js';
 import { FAT_PROTEIN, TIME_CLASS_RATIO, TREND_SLOPE_WINDOW_MIN, UNCERTAIN_INSULIN_TIMING_MIN, trendResponseAt } from './params.js';
 import type {
@@ -109,10 +110,16 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
       const inc = incAt(age0, j);
       if (knownCoverage) {
         mealEffect[j] = (mealEffect[j] as number) + inc;
-        const tau = params.tauMMin * TIME_CLASS_RATIO[meal.timeClass];
-        const dF = mealCumulativeAbsorption(age0 + (minutes[j] as number), tau) - mealCumulativeAbsorption(age0, tau);
+        const dF = mealF(meal, age0 + (minutes[j] as number), params) - mealF(meal, age0, params);
         const sc = (meal.carbsSigmaG ?? 0) * csf * dF;
         varCarb[j] = (varCarb[j] as number) + (params.mCsf * sc) ** 2;
+        // An absorption profile that moved away from the default on evidence of limited quality: the shift is only partly trusted, so
+        // a share of the difference to the default profile is added to the timing uncertainty (the band widens, the line does not move).
+        if (meal.absorption && meal.absorption.uncertaintyWeight > 0) {
+          const dDefault = mealCumulativeAbsorption(age0 + (minutes[j] as number), params.tauMMin) - mealCumulativeAbsorption(age0, params.tauMMin);
+          const shift = meal.absorption.uncertaintyWeight * Math.abs(dF - dDefault) * csf * (meal.carbsG as number);
+          varTiming[j] = (varTiming[j] as number) + (params.mCsf * shift) ** 2;
+        }
         if (meal.timingUncertaintyMin > 0) {
           const spread = Math.abs(incAt(age0 + meal.timingUncertaintyMin, j) - incAt(age0 - meal.timingUncertaintyMin, j)) / 2;
           varTiming[j] = (varTiming[j] as number) + (params.mCsf * spread) ** 2;
@@ -130,10 +137,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     }
     if (knownCoverage) {
       {
-        const tau = params.tauMMin * TIME_CLASS_RATIO[meal.timeClass];
-        slopeMeal +=
-          (csf * (meal.carbsG as number) * (mealCumulativeAbsorption(age0, tau) - mealCumulativeAbsorption(age0 - TREND_SLOPE_WINDOW_MIN, tau))) /
-          TREND_SLOPE_WINDOW_MIN;
+        slopeMeal += (csf * (meal.carbsG as number) * (mealF(meal, age0, params) - mealF(meal, age0 - TREND_SLOPE_WINDOW_MIN, params))) / TREND_SLOPE_WINDOW_MIN;
       }
       appliedMeals += 1;
       dispositions.push({ eventType: 'meal', id: meal.id, role: 'applied', reason: status === 'ambiguous' ? 'insulin_link_ambiguous' : `insulin_${status}` });
@@ -224,7 +228,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
       ? null
       : loggedMeals.reduce((acc, m) => {
           const age = (anchorSec - m.tSec) / 60 + offsetMin;
-          return acc + (m.carbsG as number) * (1 - mealCumulativeAbsorption(age, params.tauMMin * TIME_CLASS_RATIO[m.timeClass]));
+          return acc + (m.carbsG as number) * (1 - mealF(m, age, params));
         }, 0);
   const iobAt = (offsetMin: number): number | null => {
     if (input.insulinHistory === 'none_recorded') return null;
@@ -273,12 +277,21 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
   return { series, dispositions, cobG, iobU, appliedMeals, appliedInsulin, featureConfig };
 }
 
+/**
+ * Cumulative fraction of a meal's carbohydrate absorbed s minutes after eating. With a resolved absorption profile it is the
+ * early/delayed mixture; without one it is exactly the previous single gamma(2) kernel (tau = tauM x speed-class ratio).
+ */
+function mealF(meal: MealInput, sMin: number, params: EngineParams): number {
+  return meal.absorption ? profileCumulative(sMin, meal.absorption) : mealCumulativeAbsorption(sMin, params.tauMMin * TIME_CLASS_RATIO[meal.timeClass]);
+}
+
 /** Glucose increment (mg/dL, unscaled) of one meal over [age, age + h]. */
 function mealIncrement(meal: MealInput, csf: number, ageMin: number, hMin: number, params: EngineParams): number {
-  const tau = params.tauMMin * TIME_CLASS_RATIO[meal.timeClass];
-  const main = csf * (meal.carbsG as number) * (mealCumulativeAbsorption(ageMin + hMin, tau) - mealCumulativeAbsorption(ageMin, tau));
+  const main = csf * (meal.carbsG as number) * (mealF(meal, ageMin + hMin, params) - mealF(meal, ageMin, params));
   const eq = params.alphaP * (meal.proteinG ?? 0) + params.alphaF * (meal.fatG ?? 0);
-  if (eq <= 0) return main;
+  // The project spec's optional extra delayed amplitude (alphaP / alphaF, default 0) and the mass-conserving delayed fraction of an
+  // absorption profile describe the same physiology; never apply both to one meal.
+  if (eq <= 0 || (meal.absorption && meal.absorption.phi > 0)) return main;
   return main + csf * eq * delayedIncrement(ageMin, hMin);
 }
 

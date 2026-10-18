@@ -43,7 +43,7 @@ import {
 } from './events.schema.js';
 import { EventsApiService } from './events-api.service.js';
 import type { WriteStatus } from './events.service.js';
-import { ForecastService } from './forecast.service.js';
+import { ForecastService, absorptionMode } from './forecast.service.js';
 import { PersonalizationService } from './personalization.service.js';
 import { therapySettingsSchema, type TherapySettingsInput } from './therapy.schema.js';
 import { TherapyService } from './therapy.service.js';
@@ -124,8 +124,17 @@ export class ForecastController {
     return guarded(this.db, async () => {
       const { userId } = await this.users.primary();
       const rows = await this.personalization.compareBaselineVsAdjusted(userId);
+      const absorption = await this.personalization.absorptionShadowComparison(userId);
       return {
         comparison: rows,
+        absorptionModel: {
+          mode: absorptionMode(),
+          rows: absorption,
+          note:
+            absorption.length === 0
+              ? 'No scored shadow forecasts yet (they exist only for meals whose absorption profile differs from the default). Nothing can be said about accuracy.'
+              : 'Same anchors and horizons, scored against real glucose. Small samples are not evidence of improvement; promote (ABSORPTION_MODE=active) only on a sustained, adequately sized advantage.',
+        },
         note:
           rows.length === 0
             ? 'No scored forecasts with logged events yet. Nothing can be said about accuracy.'

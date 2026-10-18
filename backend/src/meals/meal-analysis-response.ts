@@ -1,5 +1,11 @@
 import type { ForecastDisplay } from '../forecasting/forecast-response.js';
-import type { GlycemicIndexConfidence, MealAnalysisItem } from './schema/meal-analysis.schema.js';
+import type {
+  AbsorptionClass,
+  ConfidenceLevel,
+  GlycemicIndexConfidence,
+  MealAnalysisItem,
+  MealFactors,
+} from './schema/meal-analysis.schema.js';
 
 /**
  * Added when the forecasting layer is available (additive: older clients ignore these). The photo
@@ -38,6 +44,13 @@ export interface MealAnalysisOkResponse extends PhotoForecastFields {
   estimatedGlycemicIndex: number | null;
   glycemicIndexConfidence: GlycemicIndexConfidence | null;
   analysisNotes: string | null;
+  /** Added with feature schema meal-features-v2 (additive; null when not provided or not assessable). */
+  absorptionClass?: AbsorptionClass | null;
+  absorptionConfidence?: ConfidenceLevel | null;
+  preparationAndMixtureFactors?: MealFactors | null;
+  /** GI x carbohydrate / 100, computed here (never asked of the model) and only when GI and the carbohydrate range are reliable enough. */
+  glycemicLoadEstimate?: number | null;
+  featureSchemaVersion?: string;
   promptVersion: string;
   modelVersion: string;
 }

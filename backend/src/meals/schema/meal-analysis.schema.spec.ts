@@ -23,6 +23,9 @@ const validDetectedResult = {
   totalFiberG: 0.6,
   estimatedGlycemicIndex: 73,
   glycemicIndexConfidence: 'medium',
+  absorptionClass: 'moderate_fast',
+  absorptionConfidence: 'medium',
+  preparationAndMixtureFactors: { form: 'solid', carbohydrateQuality: 'refined_or_simple', preparation: 'boiled_or_steamed', mixedMeal: false },
   analysisNotes: null,
 };
 
@@ -38,6 +41,9 @@ const validNoFoodResult = {
   totalFiberG: null,
   estimatedGlycemicIndex: null,
   glycemicIndexConfidence: null,
+  absorptionClass: null,
+  absorptionConfidence: null,
+  preparationAndMixtureFactors: null,
   analysisNotes: null,
 };
 

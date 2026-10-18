@@ -105,3 +105,10 @@ production database on 2026-10-16 after a backup; the database was empty, nothin
 Tests: `db/tests/verify.sql` (57 checks as the application role) and `verify_owner.sql` (6) both pass on the production schema;
 the application-level suite (`src/forecasting/*.spec.ts`) runs against the scratch database `sugarsense_test` with
 `~/sugarsense-test-db.env` (not in git). Drop and recreate that database to start clean.
+
+## Migration 0008 (meal absorption features, 2026-10-18)
+
+Additive: `meal_events.absorption_class_ai` / `absorption_confidence` (the vision model's class and confidence, together or both null),
+`glycemic_load`, `meal_factors` (jsonb object), `feature_schema_version`, `absorption_class_user` (true when the person chose the speed
+class; backfilled for classes other than the default). Applied to the scratch test database and covered by 6 checks in `db/tests/verify.sql`
+(63 pass); **not yet applied to the production database** (see `docs/ABSORPTION-MODEL.md`, section 8).

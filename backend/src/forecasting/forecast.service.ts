@@ -1,15 +1,19 @@
 import { HttpException, Inject, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { carbCoverage, linkMealsToInsulin } from '../engine/coverage.js';
 import { carbSigmaG, priorBaselineSigma, type ForecastPoint } from '../engine/compose.js';
+import { resolveAbsorptionProfile } from '../engine/absorption.js';
 import {
+  ABSORPTION_LAYER_VERSION,
   BASELINE_HORIZON_MIN,
   DEFAULT_ENGINE_PARAMS,
   ENGINE_LAYER_VERSION,
+  SHADOW_MARKER,
+  TIME_CLASS_RATIO,
   MAX_HORIZON_MIN,
   STEP_MIN,
 } from '../engine/params.js';
 import { computeRun, hashInputs, type RunInputs } from '../engine/run.js';
-import type { EngineParams, EventDisposition, EventLayerResult, InsulinInput, MealInput, MealLink } from '../engine/types.js';
+import type { AbsorptionFeatures, EngineParams, EventDisposition, EventLayerResult, InsulinInput, MealInput, MealLink } from '../engine/types.js';
 import { DbService, describeDbError } from '../db/db.service.js';
 import type { PreviewInput } from './events.schema.js';
 import { GlucoseService } from '../glucose/glucose.service.js';
@@ -39,6 +43,18 @@ const FUTURE_SLACK_SEC = 5 * 60;
  * the forecast itself (the 80% range is about +/-25 mg/dL at one hour) and would only add a second line that looks the same.
  */
 const ALL_COUNTED_MIN_DIFF_MGDL = 15;
+
+/**
+ * How the new absorption model (absorption.ts) is deployed. 'shadow' (default): the incumbent single-component profile draws the
+ * forecast, and the candidate's forecast is computed alongside, stored under a shadow model_version and scored against real outcomes,
+ * never shown or learned from. 'active': the candidate draws the forecast and the incumbent is the shadow. 'off': incumbent only.
+ * Promote by setting ABSORPTION_MODE=active only after GET /forecast/evaluation shows the candidate at least as good on stored outcomes.
+ */
+export type AbsorptionMode = 'off' | 'shadow' | 'active';
+export function absorptionMode(): AbsorptionMode {
+  const v = (process.env.ABSORPTION_MODE ?? 'shadow').toLowerCase();
+  return v === 'off' || v === 'active' ? v : 'shadow';
+}
 
 export interface RunOptions {
   horizonMin?: number;
@@ -197,11 +213,14 @@ export class ForecastService {
       }
     }
 
-    const built = buildEngineInputs({ mealRows, insulinRows, resolver, params, anchorSec });
+    const mode = absorptionMode();
+    const candidateIsMain = mode === 'active';
+    const mainVersion = candidateIsMain ? ABSORPTION_LAYER_VERSION : ENGINE_LAYER_VERSION;
+    const built = buildEngineInputs({ mealRows, insulinRows, resolver, params, anchorSec, absorption: candidateIsMain ? 'v2' : 'legacy' });
     const knots: [number, number][] = [];
     for (let m = 0; m <= MAX_HORIZON_MIN; m += STEP_MIN) knots.push([m, Math.round(sigmaFn(m) * 100) / 100]);
     const inputs: RunInputs = {
-      layerVersion: ENGINE_LAYER_VERSION,
+      layerVersion: mainVersion,
       anchorSec,
       horizonMin: horizon,
       baseline,
@@ -271,7 +290,7 @@ export class ForecastService {
           inputs,
           inputsHash: hashInputs(inputs, { therapyProfileId: atAnchor.profileId }),
           baselineModel,
-          layerModel: `${ENGINE_LAYER_VERSION}+${baselineModel}`,
+          layerModel: `${mainVersion}+${baselineModel}`,
           parameterLabel,
           therapy: atAnchor,
           layer: { ...layer, dispositions: allDispositions },
@@ -281,6 +300,9 @@ export class ForecastService {
           snapshot: { inputs, therapyAtAnchor: { version: atAnchor.version, icrStatus: atAnchor.icrStatus }, eligible },
         });
         saved = res.runId.length > 0;
+        if (mode !== 'off') {
+          await this.persistShadow({ mode, userId, inputs, mainHash: hashInputs(inputs, { therapyProfileId: atAnchor.profileId }), built, mealRows, insulinRows, resolver, params, anchorSec, atAnchor, baselineModel, parameterLabel, forceApplyIds, layer, allDispositions });
+        }
       } catch (err) {
         this.logger.warn(`forecast not saved ${describeDbError(err)}`);
         notes.push('This forecast could not be saved to your history.');
@@ -298,6 +320,9 @@ export class ForecastService {
       );
     }
     if (allLoggedCounted) notes.push(allCountedNote(allLoggedCounted, points));
+    if (candidateIsMain && built.meals.some((m) => m.absorption && m.absorption.source !== 'default' && m.absorption.source !== 'user_class' && allDispositions.some((d) => d.id === m.id && d.role === 'applied'))) {
+      notes.push('How fast a meal\'s carbohydrate arrives is estimated from the photo analysis (absorption class, fat, protein, fibre). It is an estimate, not a measurement, and it widens the range.');
+    }
 
     const changed = points.some((p) => Math.abs(p.adjusted - (p.baseline ?? p.adjusted)) >= 0.05);
 
@@ -320,7 +345,7 @@ export class ForecastService {
       },
       models: {
         baseline: g.modelVersion,
-        eventLayer: ENGINE_LAYER_VERSION,
+        eventLayer: mainVersion,
         eventLayerEvidence: eventsLoaded && userId ? await this.personalization.layerEvidence(userId) : { status: 'none_yet', samples: 0 },
       },
       saved,
@@ -328,6 +353,58 @@ export class ForecastService {
       notes: [...new Set(notes)],
       disclaimer: FORECAST_DISCLAIMER,
     };
+  }
+
+  /**
+   * Computes the OTHER absorption model on the same inputs and stores its forecast as a shadow run, only when it would actually
+   * differ (some counted meal has a non-default profile). Failure here never affects the forecast that is shown.
+   */
+  private async persistShadow(a: {
+    mode: AbsorptionMode;
+    userId: string;
+    inputs: RunInputs;
+    mainHash: string;
+    built: Built;
+    mealRows: MealRow[];
+    insulinRows: InsulinRow[];
+    resolver: TherapyResolver | null;
+    params: EngineParams;
+    anchorSec: number;
+    atAnchor: ResolvedTherapy;
+    baselineModel: string;
+    parameterLabel: string;
+    forceApplyIds: string[];
+    layer: EventLayerResult;
+    allDispositions: EventDisposition[];
+  }): Promise<void> {
+    try {
+      const candidateIsMain = a.mode === 'active';
+      const alt = buildEngineInputs({ mealRows: a.mealRows, insulinRows: a.insulinRows, resolver: a.resolver, params: a.params, anchorSec: a.anchorSec, absorption: candidateIsMain ? 'legacy' : 'v2' });
+      const applied = new Set(a.allDispositions.filter((d) => d.eventType === 'meal' && d.role === 'applied').map((d) => d.id));
+      const v2Meals = candidateIsMain ? a.built.meals : alt.meals;
+      const differs = v2Meals.some((m) => applied.has(m.id) && m.absorption && absorptionDiffersFromLegacy(m, a.params.tauMMin));
+      if (!differs) return;
+      const altVersion = candidateIsMain ? ENGINE_LAYER_VERSION : ABSORPTION_LAYER_VERSION;
+      const altInputs: RunInputs = { ...a.inputs, layerVersion: altVersion, meals: alt.meals };
+      const run = computeRun(altInputs, { forceApplyIds: a.forceApplyIds });
+      await this.store.persist({
+        userId: a.userId,
+        inputs: altInputs,
+        inputsHash: hashInputs(altInputs, { therapyProfileId: a.atAnchor.profileId, shadow: true }),
+        baselineModel: a.baselineModel,
+        layerModel: altVersion + SHADOW_MARKER + '+' + a.baselineModel,
+        parameterLabel: a.parameterLabel,
+        therapy: a.atAnchor,
+        layer: { ...run.layer, dispositions: a.allDispositions },
+        points: run.points,
+        eligible: false,
+        eventLinks: [],
+        snapshot: { shadowOf: a.mainHash, inputs: altInputs },
+        shadowOfInputsHash: a.mainHash,
+      });
+    } catch (err) {
+      this.logger.warn('shadow forecast not stored ' + describeDbError(err));
+    }
   }
 
   /** Carbohydrate coverage for one meal under the settings that applied at that time (analysis only). */
@@ -400,6 +477,13 @@ const toPointDisplay = (anchorSec: number) => (p: ForecastPoint) => ({
 
 export { declaredMealOf, isRapidActing, toLinkable } from './linkable.js';
 
+/** True when a resolved absorption profile is not the incumbent single gamma(2) component (tau = tauM x speed-class ratio). */
+export function absorptionDiffersFromLegacy(m: MealInput, tauMMin: number): boolean {
+  const p = m.absorption;
+  if (!p) return false;
+  return p.phi > 0 || Math.abs(p.tauFastMin - tauMMin * TIME_CLASS_RATIO[m.timeClass]) > 0.5;
+}
+
 /** A typed meal for a preview: nothing is stored. */
 const adHocMeal = (m: NonNullable<PreviewInput['meal']>, tSec: number): MealRow => ({
   mealId: 'preview-meal',
@@ -418,6 +502,13 @@ const adHocMeal = (m: NonNullable<PreviewInput['meal']>, tSec: number): MealRow 
   eatenAtSource: 'user_entered',
   timingUncertaintyMin: 0,
   absorptionClass: m.absorptionClass ?? 'medium',
+  absorptionClassUser: m.absorptionClass !== undefined,
+  giConfidence: null,
+  absorptionClassAi: null,
+  absorptionConfidence: null,
+  glycemicLoad: null,
+  mealFactors: null,
+  featureSchemaVersion: null,
   revision: 1,
   userEdited: false,
   note: null,
@@ -457,6 +548,8 @@ export function buildEngineInputs(a: {
   resolver: TherapyResolver | null;
   params: EngineParams;
   anchorSec: number;
+  /** 'v2': resolve each meal's absorption profile (absorption.ts); 'legacy' (default): the previous single-component behaviour. The features are recorded either way. */
+  absorption?: 'legacy' | 'v2';
 }): Built {
   const therapyAt = (t: number): ResolvedTherapy => (a.resolver ? a.resolver.at(t) : unavailableTherapy());
   const meals: MealInput[] = a.mealRows.map((m) => {
@@ -471,6 +564,17 @@ export function buildEngineInputs(a: {
             m.carbsProvenance === 'estimated' && m.carbsG === m.aiCarbsG ? m.aiCarbsHighG : null,
             a.params.cC,
           );
+    const features: AbsorptionFeatures = {
+      legacyClass: m.absorptionClass,
+      legacyClassIsUserSet: m.absorptionClassUser,
+      aiClass: m.absorptionClassAi,
+      aiConfidence: m.absorptionConfidence,
+      giEstimate: m.glycemicIndex,
+      giConfidence: m.giConfidence,
+      fatG: m.fatG,
+      proteinG: m.proteinG,
+      fiberG: m.fiberG,
+    };
     return {
       id: m.mealId,
       revision: m.revision,
@@ -484,6 +588,8 @@ export function buildEngineInputs(a: {
       timingUncertaintyMin: m.timingUncertaintyMin,
       icrGPerU: t.icrGPerU,
       isfMgdlPerU: t.isfMgdlPerU,
+      absorptionFeatures: features,
+      ...(a.absorption === 'v2' ? { absorption: resolveAbsorptionProfile(features, a.params.tauMMin) } : {}),
     };
   });
 

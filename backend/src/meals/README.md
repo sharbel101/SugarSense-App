@@ -120,3 +120,12 @@ On `no_food_detected` / `needs_manual_entry` the forecast is the glucose-only on
 Optional request fields: `clientId` (a retry maps to the same meal event) and `eatenAt` (ISO time eating started; default: now).
 The Gemini schema and prompt are unchanged (fat, protein, fibre, GI and the carbohydrate range were already returned).
 Contract: `../forecasting/README.md`.
+
+## Absorption features (prompt `meal-analysis-v2`, feature schema `meal-features-v2`, added 2026-10-18, additive)
+
+The analysis also returns `absorptionClass` (`fast` / `moderate_fast` / `moderate_mixed` / `slow_delayed`), `absorptionConfidence`,
+`preparationAndMixtureFactors` and a server-computed `glycemicLoadEstimate` (GI x net carbs / 100, only when GI is medium-confidence and the
+carbohydrate range is tight). All are nullable: an older response, an unknown label or a missing key reads as "not provided" (Gate 1
+`withAbsorptionDefaults`), and a no-food/unidentified result must carry none of them (Gate 2). They are stored on the meal (migration
+`0008`) and feed the absorption model; see `docs/ABSORPTION-MODEL.md` for the equations, parameters, sources, deployment (shadow first)
+and the measured results. GI is never a multiplier and is never inferred from a photo.

@@ -4,7 +4,7 @@
  * it is stored on every meal record, successful or not, so a historical prediction can always be
  * traced back to the exact instructions that produced it (CLAUDE.md section 3, invariant 4).
  *
- * NOTE ON PROVENANCE: no verbatim prompt/schema text was present in the task that requested this
+ * NOTE ON PROVENANCE (v1; v2 added rule 8 and the absorption fields): no verbatim prompt/schema text was present in the task that requested this
  * endpoint (the message referred to "the system prompt and JSON schema I've specified (given
  * above)", but no such text appears earlier in this conversation). This wording was authored from
  * scratch to satisfy every constraint that WAS stated explicitly: no silent bias, an honest range
@@ -12,7 +12,14 @@
  * explicit "no food" / "unidentified" states. Treat this as a first draft - if there is an existing
  * exact wording elsewhere, swap it in here and bump PROMPT_VERSION.
  */
-export const PROMPT_VERSION = 'meal-analysis-v1';
+export const PROMPT_VERSION = 'meal-analysis-v2';
+
+/**
+ * Version of the structured feature set the analysis returns (carbohydrates, fat, protein, fibre, GI, absorption class and its
+ * confidence, preparation / mixture factors). Stored with every meal so a stored prediction can be traced to the exact feature
+ * definitions it used. v2 (2026-10-18) added absorptionClass, absorptionConfidence and preparationAndMixtureFactors.
+ */
+export const FEATURE_SCHEMA_VERSION = 'meal-features-v2';
 
 export function buildMealAnalysisSystemPrompt(): string {
   return `You are a nutrition estimation assistant embedded in a Type 1 diabetes decision-support app. \
@@ -58,6 +65,25 @@ Hard rules:
    coating", not "food" or "item" or "unidentified food").
 7. Extract fat and protein because they change how long carbohydrate absorption takes (a
    high-fat/high-protein meal absorbs later and slower) - not to report calories for their own sake.
-8. Respond with ONLY the JSON object described by the response schema. No prose, no markdown fences,
+8. ABSORPTION PROFILE (absorptionClass, absorptionConfidence, preparationAndMixtureFactors). These describe the LIKELY SHAPE
+   of how quickly the carbohydrate in this whole meal reaches the blood - an estimated profile, never a promised glucose curve.
+   Choose ONE absorptionClass from the whole meal, reasoning from the carbohydrate form, its processing and the fat/protein:
+   - "fast": liquid or simple, refined sugars with little fat, protein or fibre (a sugary drink, juice, glucose tablets, sweets).
+   - "moderate_fast": carbohydrate that is probably absorbed fairly quickly but is not purely liquid or sugar (white bread or
+     rice, cereal, a plain sweet pastry, fruit eaten alone).
+   - "moderate_mixed": an ordinary mixed meal, OR when you do not have enough evidence for anything more specific. When in doubt
+     choose this one; it is the safe default.
+   - "slow_delayed": substantial fat and/or protein, or other clear signs of slower early absorption and a prolonged later effect
+     (pizza, fried or creamy dishes, a large portion of meat or cheese with the carbohydrate).
+   Do NOT choose the class from a food name alone, and do NOT derive it from a single GI number: a high-fat meal can still contain
+   quickly absorbed carbohydrate, and a low-GI food is not automatically high in fat or protein. Fat and protein are the main
+   evidence for "slow_delayed"; liquid form and refined sugar are the main evidence for "fast".
+   absorptionConfidence is "high" only for an obvious case (a clearly sugary drink), "low" whenever composition, portion or
+   preparation is a guess. preparationAndMixtureFactors records what you actually relied on: form (liquid / solid / mixed),
+   carbohydrateQuality (refined_or_simple / minimally_processed / mixed), preparation (fried, baked_or_roasted, boiled_or_steamed,
+   raw, packaged_or_processed) and mixedMeal (carbohydrate eaten with substantial fat or protein). Use "unknown" / null for
+   anything you cannot tell. For "no_food" and "unidentified" set absorptionClass, absorptionConfidence and
+   preparationAndMixtureFactors to null.
+9. Respond with ONLY the JSON object described by the response schema. No prose, no markdown fences,
    no commentary outside the schema's own analysisNotes field.`;
 }

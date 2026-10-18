@@ -146,6 +146,10 @@ has no carbohydrates. `allLoggedCounted` shows where the line would go if those 
 * It is **not saved** and **never learned from**; the stored run is the main line. It is an observation about the entries the person
   logged, not a dose suggestion, and no forecast value feeds any dose calculation.
 
+## Meal absorption model (shadow first, 2026-10-18)
+
+How fast a meal's carbohydrate appears now depends on the photo analysis (absorption class and confidence, fat, protein, fibre, GI as weak evidence) through a mass-conserving early/delayed mixture, instead of one fixed gamma(2) curve. It runs in **shadow** mode by default (`ABSORPTION_MODE`; not yet deployed, needs migration 0008): the incumbent draws the forecast, the candidate is stored under a `-shadow` model version, scored against real outcomes and compared in `GET /forecast/evaluation` (`absorptionModel`). Shadow rows never feed learning, evidence or performance. Every run stores each meal's features and resolved profile (`absorptionFeatures`, `absorption` in the run inputs), so replay reproduces the forecast. Full equations, parameters, sources, results and limitations: `../../docs/ABSORPTION-MODEL.md`.
+
 ## Withdrawn entries (the app's trash button)
 
 `PATCH /events/meals/:id` and `PATCH /events/insulin/:id` with `{ "status": "cancelled", "expectedRevision": n }` withdraw an entry. Nothing is deleted:

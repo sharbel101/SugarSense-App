@@ -35,6 +35,12 @@ export interface PersistArgs {
   eventLinks: EventLinkRecord[];
   /** The complete normalised inputs and a few derived values, for replay and audit. */
   snapshot: Record<string, unknown>;
+  /**
+   * A SHADOW run: a candidate model's forecast stored only so it can be scored against the incumbent. It writes just its own
+   * meal-aware predictions (no glucose-only baseline rows, no event links), carries `shadowOfInputsHash` in each prediction snapshot,
+   * and is never shown or learned from (its model_version contains the shadow marker).
+   */
+  shadowOfInputsHash?: string;
 }
 
 const LINK_TYPE: Record<LinkStatus, string> = {
@@ -87,7 +93,7 @@ export class PredictionStore {
       }
       const runId = run.rows[0].run_id;
 
-      for (const l of a.eventLinks) {
+      for (const l of a.shadowOfInputsHash ? [] : a.eventLinks) {
         const d = l.disposition;
         await c.query(
           `INSERT INTO prediction_event_links (run_id, meal_id, insulin_id, role, role_reason, event_time, event_revision,
@@ -169,7 +175,7 @@ export class PredictionStore {
         const p = a.points.find((x) => x.minutes === h);
         if (!p) continue;
         const j = h / 5 - 1;
-        if (p.baseline !== null) {
+        if (p.baseline !== null && !a.shadowOfInputsHash) {
           const s = sigma(h);
           await insertPrediction({
             horizon: h,
@@ -192,7 +198,8 @@ export class PredictionStore {
             parameterVersion: a.parameterLabel,
             featureConfig: a.layer.featureConfig,
             snapshot: {
-              role: 'meal_aware',
+              role: a.shadowOfInputsHash ? 'meal_aware_shadow' : 'meal_aware',
+              ...(a.shadowOfInputsHash ? { shadowOf: a.shadowOfInputsHash } : {}),
               baselinePredMgdl: p.baseline ?? heldBaseline,
               mealEffectUnscaled: series.mealEffect[j],
               insulinEffectUnscaled: series.insulinEffect[j],

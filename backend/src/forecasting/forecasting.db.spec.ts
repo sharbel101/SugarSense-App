@@ -204,7 +204,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
         user_edited: false,
         analysis_status: 'ok',
         model_version: 'gemini-test',
-        prompt_version: 'meal-analysis-v1',
+        prompt_version: 'meal-analysis-v2',
         ai_confidence: 'medium',
       });
       expect(Number(meal.carbs_g)).toBe(45);

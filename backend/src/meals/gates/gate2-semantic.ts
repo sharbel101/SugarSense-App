@@ -34,6 +34,9 @@ export function runGate2SemanticSanity(result: MealAnalysisResult): Gate2Result 
       result.totalProteinG,
       result.totalFiberG,
       result.estimatedGlycemicIndex,
+      result.absorptionClass,
+      result.absorptionConfidence,
+      result.preparationAndMixtureFactors,
     ].some((value) => value !== null);
     if (hasLeakedNumbers || result.items.length > 0) {
       reasons.push(

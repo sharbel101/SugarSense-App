@@ -4,6 +4,40 @@
  */
 
 export type TimeClass = 'fast' | 'medium' | 'slow';
+/** Four broad absorption classes (see absorption.ts). Descriptions of a likely profile, not predictions of a glucose curve. */
+export type AbsorptionClass = 'fast' | 'moderate_fast' | 'moderate_mixed' | 'slow_delayed';
+
+/** What is known about how fast a meal's carbohydrate appears. Every field may be missing; missing means "not provided", never zero. */
+export interface AbsorptionFeatures {
+  /** The speed class stored on the meal (fast / medium / slow) and whether the PERSON chose it (else it is just the default). */
+  legacyClass: TimeClass;
+  legacyClassIsUserSet: boolean;
+  aiClass: AbsorptionClass | null;
+  aiConfidence: 'low' | 'medium' | 'high' | null;
+  giEstimate: number | null;
+  giConfidence: 'low' | 'medium' | null;
+  fatG: number | null;
+  proteinG: number | null;
+  fiberG: number | null;
+}
+
+/**
+ * The resolved carbohydrate-absorption profile of a meal: F_total(s) = (1 - phi) F(s; tauFast) + phi F(s - delay; tauSlow).
+ * Mass is conserved (F_total -> 1). Stored in the run inputs so a forecast can be replayed exactly.
+ */
+export interface AbsorptionProfile {
+  version: string;
+  tauFastMin: number;
+  /** Delayed fraction, 0..0.6. */
+  phi: number;
+  delayMin: number;
+  tauSlowMin: number;
+  /** Which evidence chose it, e.g. "default", "user_class", "class+macros". */
+  source: string;
+  /** 0..1: share of the shift away from the default profile that is treated as uncertain (widens the band, never moves the line). */
+  uncertaintyWeight: number;
+}
+
 export type CarbProvenance = 'estimated' | 'user_corrected' | 'user_entered';
 export type InsulinConfirmation = 'confirmed' | 'uncertain' | 'planned';
 
@@ -32,6 +66,10 @@ export interface MealInput {
   /** ICR (g/U) and ISF (mg/dL/U) valid at the meal time; null = not set. */
   icrGPerU: number | null;
   isfMgdlPerU: number | null;
+  /** Resolved absorption profile; absent = the previous single-component behaviour (tau = tauM x timeClass ratio). */
+  absorption?: AbsorptionProfile;
+  /** The inputs the profile was resolved from (kept for reproducibility and later calibration); present when it was resolved. */
+  absorptionFeatures?: AbsorptionFeatures;
 }
 
 export interface InsulinInput {

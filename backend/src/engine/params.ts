@@ -8,7 +8,12 @@ import type { EngineParams, TimeClass } from './types.js';
  * two bounded scales mCsf and mIsf (spec section 8: s_CSF, s_ISF).
  */
 
+/** Incumbent: every meal absorbs as ONE gamma(2) component (tau = tauM x the person's speed class). */
 export const ENGINE_LAYER_VERSION = 'meal-aware-0.1';
+/** Candidate: meals absorb with the early/delayed absorption profile of absorption.ts (class, GI as weak evidence, fat, protein, fibre). */
+export const ABSORPTION_LAYER_VERSION = 'meal-aware-0.2';
+/** Stored model_version of a SHADOW forecast contains this marker; shadow rows are never used for learning, evidence or display. */
+export const SHADOW_MARKER = '-shadow';
 
 export const DEFAULT_ENGINE_PARAMS: EngineParams = {
   tauMMin: 40, // spec section 4: Hovorka gut time constant (tier L)

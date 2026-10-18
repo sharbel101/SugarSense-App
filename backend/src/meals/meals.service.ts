@@ -4,7 +4,7 @@ import type { AnalyzeMealRequest } from './dto/analyze-meal-request.schema.js';
 import { runGate1Structural } from './gates/gate1-structural.js';
 import { runGate2SemanticSanity } from './gates/gate2-semantic.js';
 import type { MealAnalysisResponse } from './meal-analysis-response.js';
-import { PROMPT_VERSION } from './prompt/meal-analysis-prompt.js';
+import { FEATURE_SCHEMA_VERSION, PROMPT_VERSION } from './prompt/meal-analysis-prompt.js';
 import {
   MEAL_VISION_PROVIDER,
   MealVisionApiError,
@@ -169,7 +169,24 @@ function buildResponse(
     estimatedGlycemicIndex: data.estimatedGlycemicIndex,
     glycemicIndexConfidence: data.glycemicIndexConfidence,
     analysisNotes: data.analysisNotes,
+    absorptionClass: data.absorptionClass,
+    absorptionConfidence: data.absorptionConfidence,
+    preparationAndMixtureFactors: data.preparationAndMixtureFactors,
+    glycemicLoadEstimate: glycemicLoad(data),
+    featureSchemaVersion: FEATURE_SCHEMA_VERSION,
     promptVersion,
     modelVersion,
   };
+}
+
+/**
+ * Glycaemic load = GI x available carbohydrate (g) / 100 (the standard definition, applied to the project's net-carbohydrate figure).
+ * A derived feature, not a model output: only when the GI estimate is of medium confidence AND the carbohydrate range is reasonably
+ * tight (width <= 60% of the estimate); otherwise null, never a guess.
+ */
+export function glycemicLoad(data: Pick<MealAnalysisResult, 'estimatedGlycemicIndex' | 'glycemicIndexConfidence' | 'totalNetCarbsG' | 'totalCarbsRangeLowG' | 'totalCarbsRangeHighG'>): number | null {
+  const { estimatedGlycemicIndex: gi, glycemicIndexConfidence: conf, totalNetCarbsG: c, totalCarbsRangeLowG: lo, totalCarbsRangeHighG: hi } = data;
+  if (gi === null || conf !== 'medium' || c === null || !(c > 0) || lo === null || hi === null) return null;
+  if ((hi - lo) / c > 0.6) return null;
+  return Math.round(((gi * c) / 100) * 10) / 10;
 }

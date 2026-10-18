@@ -34,6 +34,15 @@ export interface MealRow {
   eatenAtSource: 'user_entered' | 'photo_time' | 'assumed';
   timingUncertaintyMin: number;
   absorptionClass: TimeClass;
+  /** true when the PERSON chose absorptionClass (a person's choice outranks the vision model's class). */
+  absorptionClassUser: boolean;
+  giConfidence: 'low' | 'medium' | null;
+  /** The vision model's absorption class / confidence for the whole meal (feature schema meal-features-v2); null = not provided. */
+  absorptionClassAi: 'fast' | 'moderate_fast' | 'moderate_mixed' | 'slow_delayed' | null;
+  absorptionConfidence: 'low' | 'medium' | 'high' | null;
+  glycemicLoad: number | null;
+  mealFactors: Record<string, unknown> | null;
+  featureSchemaVersion: string | null;
   revision: number;
   userEdited: boolean;
   note: string | null;
@@ -74,6 +83,13 @@ type DbMeal = {
   eaten_at_source: MealRow['eatenAtSource'];
   timing_uncertainty_min: number;
   absorption_class: TimeClass;
+  absorption_class_user: boolean;
+  gi_confidence: 'low' | 'medium' | null;
+  absorption_class_ai: MealRow['absorptionClassAi'];
+  absorption_confidence: MealRow['absorptionConfidence'];
+  glycemic_load: string | null;
+  meal_factors: Record<string, unknown> | null;
+  feature_schema_version: string | null;
   revision: number;
   user_edited: boolean;
   note: string | null;
@@ -100,7 +116,8 @@ const num = (v: string | null): number | null => (v === null ? null : Number(v))
 
 const MEAL_COLUMNS = `meal_id, client_uuid, eaten_at, status, carbs_g, carbs_provenance, fat_g, protein_g, fiber_g,
   glycemic_index, ai_carbs_g, ai_carbs_low_g, ai_carbs_high_g, eaten_at_source, timing_uncertainty_min,
-  absorption_class, revision, user_edited, note, label`;
+  absorption_class, absorption_class_user, gi_confidence, absorption_class_ai, absorption_confidence, glycemic_load, meal_factors,
+  feature_schema_version, revision, user_edited, note, label`;
 const INSULIN_COLUMNS = `insulin_id, client_uuid, administered_at, kind, insulin_type, units_administered,
   units_suggested, confirmation, meal_id, timing_uncertain, revision, status`;
 
@@ -121,6 +138,13 @@ const mapMeal = (r: DbMeal): MealRow => ({
   eatenAtSource: r.eaten_at_source,
   timingUncertaintyMin: r.timing_uncertainty_min,
   absorptionClass: r.absorption_class,
+  absorptionClassUser: r.absorption_class_user,
+  giConfidence: r.gi_confidence,
+  absorptionClassAi: r.absorption_class_ai,
+  absorptionConfidence: r.absorption_confidence,
+  glycemicLoad: num(r.glycemic_load),
+  mealFactors: r.meal_factors,
+  featureSchemaVersion: r.feature_schema_version,
   revision: r.revision,
   userEdited: r.user_edited,
   note: r.note,
@@ -205,8 +229,9 @@ export class EventsService {
 
       const row = await c.query<DbMeal>(
         `INSERT INTO meal_events (user_id, client_uuid, eaten_at, status, carbs_g, carbs_provenance, fat_g, protein_g,
-                                  fiber_g, glycemic_index, eaten_at_source, timing_uncertainty_min, absorption_class, note, label)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'user_entered',$11,$12,$13,$14)
+                                  fiber_g, glycemic_index, eaten_at_source, timing_uncertainty_min, absorption_class, note, label,
+                                  absorption_class_user)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'user_entered',$11,$12,$13,$14,$15)
          ON CONFLICT (user_id, client_uuid) DO NOTHING
          RETURNING ${MEAL_COLUMNS}`,
         [
@@ -224,6 +249,7 @@ export class EventsService {
           input.absorptionClass ?? 'medium',
           input.note ?? null,
           input.label ?? null,
+          input.absorptionClass !== undefined,
         ],
       );
       if (!row.rows[0]) {
@@ -251,8 +277,10 @@ export class EventsService {
         `INSERT INTO meal_events (user_id, client_uuid, eaten_at, status, carbs_g, carbs_provenance, carbs_sigma_g, fat_g,
                                   protein_g, fiber_g, glycemic_index, gi_confidence, analysis_status, ai_carbs_g,
                                   ai_carbs_low_g, ai_carbs_high_g, ai_confidence, model_version, prompt_version,
-                                  analysis_raw, eaten_at_source, timing_uncertainty_min, note, label)
-         VALUES ($1,$2,$3,'draft',$4,'estimated',NULL,$5,$6,$7,$8,$9,'ok',$4,$10,$11,$12,$13,$14,$15,'photo_time',$16,$17,$18)
+                                  analysis_raw, eaten_at_source, timing_uncertainty_min, note, label,
+                                  absorption_class_ai, absorption_confidence, glycemic_load, meal_factors, feature_schema_version)
+         VALUES ($1,$2,$3,'draft',$4,'estimated',NULL,$5,$6,$7,$8,$9,'ok',$4,$10,$11,$12,$13,$14,$15,'photo_time',$16,$17,$18,
+                 $19,$20,$21,$22,$23)
          ON CONFLICT (user_id, client_uuid) DO NOTHING
          RETURNING ${MEAL_COLUMNS}`,
         [
@@ -274,6 +302,11 @@ export class EventsService {
           PHOTO_TIME_UNCERTAINTY_MIN,
           args.userNote ?? null,
           photoMealLabel(a.items.map((i) => i.name)),
+          a.absorptionClass ?? null,
+          a.absorptionClass ? (a.absorptionConfidence ?? 'low') : null,
+          a.glycemicLoadEstimate ?? null,
+          a.preparationAndMixtureFactors ? JSON.stringify(a.preparationAndMixtureFactors) : null,
+          a.featureSchemaVersion ?? null,
         ],
       );
       if (!row.rows[0]) {
@@ -324,7 +357,10 @@ export class EventsService {
       if (patch.proteinG !== undefined) next.proteinG = patch.proteinG;
       if (patch.fiberG !== undefined) next.fiberG = patch.fiberG;
       if (patch.glycemicIndex !== undefined) next.glycemicIndex = patch.glycemicIndex;
-      if (patch.absorptionClass !== undefined) next.absorptionClass = patch.absorptionClass;
+      if (patch.absorptionClass !== undefined) {
+        next.absorptionClass = patch.absorptionClass;
+        next.absorptionClassUser = true;
+      }
       if (patch.timingUncertaintyMin !== undefined) next.timingUncertaintyMin = patch.timingUncertaintyMin;
       if (patch.note !== undefined) next.note = patch.note;
       if (patch.label !== undefined) next.label = patch.label;
@@ -353,7 +389,7 @@ export class EventsService {
       const updated = await c.query<DbMeal>(
         `UPDATE meal_events SET eaten_at = $3, status = $4, carbs_g = $5, carbs_provenance = $6, fat_g = $7, protein_g = $8,
                 fiber_g = $9, glycemic_index = $10, absorption_class = $11, timing_uncertainty_min = $12,
-                eaten_at_source = $13, user_edited = $14, note = $15, label = $16, revision = revision + 1
+                eaten_at_source = $13, user_edited = $14, note = $15, label = $16, absorption_class_user = $17, revision = revision + 1
           WHERE meal_id = $1 AND user_id = $2 RETURNING ${MEAL_COLUMNS}`,
         [
           mealId,
@@ -372,6 +408,7 @@ export class EventsService {
           next.userEdited,
           next.note,
           next.label,
+          next.absorptionClassUser,
         ],
       );
       const after = mapMeal(updated.rows[0] as DbMeal);

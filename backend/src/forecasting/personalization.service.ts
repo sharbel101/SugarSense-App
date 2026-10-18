@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DbService, describeDbError } from '../db/db.service.js';
 import { governedStep, validateCandidate, type FitExample } from '../engine/fit.js';
-import { ENGINE_LAYER_VERSION } from '../engine/params.js';
+import { SHADOW_MARKER } from '../engine/params.js';
 import { OutcomeService } from './outcome.service.js';
 import { ParametersService } from './parameters.service.js';
 
@@ -50,6 +50,21 @@ export interface LayerEvidence {
 /** Scored forecasts needed at EACH of 30, 60 and 120 min before any verdict other than none_yet. */
 export const EVIDENCE_MIN_SAMPLES = 30;
 const EVIDENCE_TTL_MS = 5 * 60_000;
+
+export interface AbsorptionComparisonRow {
+  horizonMin: number;
+  /** model_version that draws the forecast / the one stored alongside it. */
+  shownModel: string;
+  shadowModel: string;
+  n: number;
+  maeShown: number;
+  maeShadow: number;
+  rmseShown: number;
+  rmseShadow: number;
+  /** Fraction of observed values inside the 80% interval. */
+  coverageShown: number;
+  coverageShadow: number;
+}
 
 export interface HorizonComparison {
   horizonMin: number;
@@ -126,13 +141,13 @@ export class PersonalizationService {
                 (p.input_snapshot->>'insulinEffectUnscaled')::float8 AS i,
                 o.observed_mgdl::float8 AS obs
            FROM predictions p JOIN prediction_outcomes o USING (prediction_id)
-          WHERE p.user_id = $1 AND p.model_version LIKE $2 AND p.horizon_min = ANY($3::int[])
+          WHERE p.user_id = $1 AND p.model_version LIKE $2 AND p.model_version NOT LIKE '%${SHADOW_MARKER}+%' AND p.horizon_min = ANY($3::int[])
             AND p.feature_config <> 'glucose_only'
             AND (p.input_snapshot->>'eligible')::boolean IS TRUE
             ${NO_WITHDRAWN_EVENTS('p')}
           ORDER BY p.anchor_at, p.horizon_min, p.created_at DESC) x
        ORDER BY anchor_at`,
-      [userId, `${ENGINE_LAYER_VERSION}%`, FIT_HORIZONS_MIN],
+      [userId, 'meal-aware-%', FIT_HORIZONS_MIN],
     );
     const anchors = new Set(r.rows.map((x) => x.anchor_at.getTime())).size;
     return {
@@ -219,6 +234,44 @@ export class PersonalizationService {
   }
 
   /**
+   * Scored comparison of the shadow absorption model against the model that draws the forecast, on the SAME anchors and horizons
+   * (each shadow prediction carries the inputs hash of the main prediction it shadows). Numbers only: small samples prove nothing.
+   */
+  async absorptionShadowComparison(userId: string): Promise<AbsorptionComparisonRow[]> {
+    const r = await this.db.query<{
+      horizon_min: number; main_version: string; shadow_version: string; n: string;
+      mae_main: string; mae_shadow: string; rmse_main: string; rmse_shadow: string; cov_main: string; cov_shadow: string;
+    }>(
+      `SELECT sp.horizon_min, mp.model_version AS main_version, sp.model_version AS shadow_version, COUNT(*) AS n,
+              AVG(abs(mo.signed_error_mgdl)) AS mae_main, AVG(abs(so.signed_error_mgdl)) AS mae_shadow,
+              SQRT(AVG(mo.signed_error_mgdl * mo.signed_error_mgdl)) AS rmse_main, SQRT(AVG(so.signed_error_mgdl * so.signed_error_mgdl)) AS rmse_shadow,
+              AVG((mo.within_interval)::int) AS cov_main, AVG((so.within_interval)::int) AS cov_shadow
+         FROM predictions sp
+         JOIN prediction_outcomes so ON so.prediction_id = sp.prediction_id
+         JOIN predictions mp ON mp.user_id = sp.user_id AND mp.anchor_at = sp.anchor_at AND mp.horizon_min = sp.horizon_min
+                            AND mp.inputs_hash = sp.input_snapshot->>'shadowOf' AND mp.feature_config <> 'glucose_only'
+                            AND mp.model_version NOT LIKE '%${SHADOW_MARKER}+%'
+         JOIN prediction_outcomes mo ON mo.prediction_id = mp.prediction_id
+        WHERE sp.user_id = $1 AND sp.model_version LIKE '%${SHADOW_MARKER}+%'
+        GROUP BY sp.horizon_min, mp.model_version, sp.model_version
+        ORDER BY sp.horizon_min`,
+      [userId],
+    );
+    return r.rows.map((x) => ({
+      horizonMin: x.horizon_min,
+      shownModel: x.main_version,
+      shadowModel: x.shadow_version,
+      n: Number(x.n),
+      maeShown: Number(x.mae_main),
+      maeShadow: Number(x.mae_shadow),
+      rmseShown: Number(x.rmse_main),
+      rmseShadow: Number(x.rmse_shadow),
+      coverageShown: Number(x.cov_main),
+      coverageShadow: Number(x.cov_shadow),
+    }));
+  }
+
+  /**
    * Historical comparison of the meal-aware layer against the glucose-only baseline on the same
    * anchors and horizons, from stored outcomes. Reports numbers only; it claims nothing by itself.
    */
@@ -243,12 +296,12 @@ export class PersonalizationService {
          JOIN predictions b ON b.run_id = a.run_id AND b.horizon_min = a.horizon_min AND b.feature_config = 'glucose_only'
          JOIN prediction_outcomes oa ON oa.prediction_id = a.prediction_id
          JOIN prediction_outcomes ob ON ob.prediction_id = b.prediction_id
-        WHERE a.user_id = $1 AND a.model_version LIKE $2 AND a.feature_config <> 'glucose_only'
+        WHERE a.user_id = $1 AND a.model_version LIKE $2 AND a.model_version NOT LIKE '%${SHADOW_MARKER}+%' AND a.feature_config <> 'glucose_only'
           AND ($3::timestamptz IS NULL OR a.anchor_at >= $3::timestamptz)
           ${NO_WITHDRAWN_EVENTS('a')}
         GROUP BY a.horizon_min, a.feature_config
         ORDER BY a.horizon_min, a.feature_config`,
-      [userId, `${ENGINE_LAYER_VERSION}%`, sinceIso ?? null],
+      [userId, 'meal-aware-%', sinceIso ?? null],
     );
     return r.rows.map((x) => ({
       horizonMin: x.horizon_min,
