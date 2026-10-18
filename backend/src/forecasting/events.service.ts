@@ -4,7 +4,9 @@ import { DbService } from '../db/db.service.js';
 import type { MealAnalysisOkResponse } from '../meals/meal-analysis-response.js';
 import type { CarbProvenance, InsulinConfirmation, TimeClass } from '../engine/types.js';
 import type { CreateInsulinInput, CreateMealInput, EditInsulinInput, EditMealInput } from './events.schema.js';
+import { linkMealsToInsulin } from '../engine/coverage.js';
 import { clientIdToUuid } from './client-id.js';
+import { toLinkable } from './linkable.js';
 import { toIso, toSec } from './time.js';
 
 /** Late entries are welcome (the window is replayed), but not unboundedly old ones. */
@@ -148,6 +150,14 @@ export interface MealWriteResult {
   meal: MealRow | null;
   /** Set for 'duplicate': the entry this one probably repeats. */
   duplicateOf?: string;
+  reason?: string;
+}
+export interface MealCancelResult {
+  /** updated = something was removed; unchanged = nothing left to remove; not_found; conflict (stale revision, nothing changed). */
+  status: WriteStatus;
+  meal: MealRow | null;
+  /** The insulin entries removed by THIS call, in their state after. */
+  insulin: InsulinRow[];
   reason?: string;
 }
 export interface InsulinWriteResult {
@@ -385,6 +395,97 @@ export class EventsService {
         }
       }
       return { status: 'updated', meal: after };
+    });
+  }
+
+  /**
+   * Removes a meal AND the insulin that belongs to it, atomically (one transaction, one revision each, history kept). The insulin is:
+   *  - every active entry NAMED against this meal (`meal_id`), whatever its amount (an "I took none" record included), and
+   *  - the entries the system itself pairs with the meal by time (the same linking the forecast and the coverage view use: a single
+   *    unambiguous dose within 30 min before / 20 min after, or a confirmed "took none").
+   * A dose that could belong to two meals, or one that is far from the meal, is NOT removed. Nothing is deleted: the rows and their
+   * revisions stay (earlier forecasts that used them must stay reproducible); they simply stop counting everywhere.
+   * Repeating the call is safe: a meal that is already removed still has its remaining named entries removed, else "unchanged".
+   */
+  async cancelMealWithInsulin(
+    userId: string,
+    mealId: string,
+    opts: { expectedRevision?: number; includeInsulin?: boolean } = {},
+  ): Promise<MealCancelResult> {
+    const includeInsulin = opts.includeInsulin !== false;
+    return this.db.tx(async (c) => {
+      const cur = await c.query<DbMeal>(`SELECT ${MEAL_COLUMNS} FROM meal_events WHERE meal_id = $1 AND user_id = $2 FOR UPDATE`, [mealId, userId]);
+      const before = cur.rows[0] ? mapMeal(cur.rows[0]) : null;
+      if (!before) return { status: 'not_found', meal: null, insulin: [] };
+      if (before.status !== 'cancelled' && opts.expectedRevision !== undefined && opts.expectedRevision !== before.revision) {
+        return { status: 'conflict', meal: before, insulin: [], reason: 'the meal was changed since you loaded it' };
+      }
+
+      const doseIds = new Set<string>();
+      if (includeInsulin) {
+        const named = await c.query<{ insulin_id: string }>(
+          "SELECT insulin_id FROM insulin_events WHERE user_id = $1 AND meal_id = $2 AND status = 'active'",
+          [userId, mealId],
+        );
+        for (const r of named.rows) doseIds.add(r.insulin_id);
+        if (before.status !== 'cancelled' && before.status !== 'draft') {
+          const from = toIso(before.eatenAtSec - 3600);
+          const to = toIso(before.eatenAtSec + 3600);
+          const meals = await c.query<DbMeal>(
+            `SELECT ${MEAL_COLUMNS} FROM meal_events WHERE user_id = $1 AND status NOT IN ('cancelled', 'draft') AND eaten_at BETWEEN $2 AND $3`,
+            [userId, from, to],
+          );
+          const doses = await c.query<DbInsulin>(
+            `SELECT ${INSULIN_COLUMNS},
+                    (SELECT m.status IN ('cancelled', 'draft') FROM meal_events m WHERE m.meal_id = insulin_events.meal_id) AS meal_not_counted
+               FROM insulin_events WHERE user_id = $1 AND status = 'active' AND administered_at BETWEEN $2 AND $3`,
+            [userId, from, to],
+          );
+          const links = linkMealsToInsulin(
+            meals.rows.map((m) => ({ id: m.meal_id, tSec: Math.floor(m.eaten_at.getTime() / 1000) })),
+            doses.rows.map((d) => toLinkable(mapInsulin(d))),
+          );
+          const mine = links.find((l) => l.mealId === mealId);
+          if (mine && (mine.status === 'linked_declared' || mine.status === 'linked_auto' || mine.status === 'confirmed_none')) {
+            for (const id of mine.insulinIds) doseIds.add(id);
+          }
+        }
+      }
+
+      const removed: InsulinRow[] = [];
+      let afterMeal = before;
+      if (before.status !== 'cancelled') {
+        const upd = await c.query<DbMeal>(
+          `UPDATE meal_events SET status = 'cancelled', revision = revision + 1 WHERE meal_id = $1 AND user_id = $2 RETURNING ${MEAL_COLUMNS}`,
+          [mealId, userId],
+        );
+        afterMeal = mapMeal(upd.rows[0] as DbMeal);
+        await c.query(
+          "INSERT INTO event_revisions (entity_type, entity_id, revision, reason, before_state, after_state) VALUES ('meal', $1, $2, $3, $4, $5)",
+          [mealId, afterMeal.revision, 'user_cancel', JSON.stringify(before), JSON.stringify(afterMeal)],
+        );
+      }
+      if (doseIds.size > 0) {
+        const rows = await c.query<DbInsulin>(
+          `SELECT ${INSULIN_COLUMNS} FROM insulin_events WHERE insulin_id = ANY($1::uuid[]) AND user_id = $2 AND status = 'active' ORDER BY administered_at, insulin_id FOR UPDATE`,
+          [[...doseIds], userId],
+        );
+        for (const row of rows.rows) {
+          const was = mapInsulin(row);
+          const upd = await c.query<DbInsulin>(
+            `UPDATE insulin_events SET status = 'cancelled', revision = revision + 1 WHERE insulin_id = $1 AND user_id = $2 RETURNING ${INSULIN_COLUMNS}`,
+            [was.insulinId, userId],
+          );
+          const now = mapInsulin(upd.rows[0] as DbInsulin);
+          await c.query(
+            "INSERT INTO event_revisions (entity_type, entity_id, revision, reason, before_state, after_state) VALUES ('insulin', $1, $2, $3, $4, $5)",
+            [was.insulinId, now.revision, 'user_cancel_with_meal', JSON.stringify(was), JSON.stringify(now)],
+          );
+          removed.push(now);
+        }
+      }
+      const changed = before.status !== 'cancelled' || removed.length > 0;
+      return { status: changed ? 'updated' : 'unchanged', meal: afterMeal, insulin: removed };
     });
   }
 

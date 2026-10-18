@@ -532,6 +532,119 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
     });
   });
 
+  describe('cancelling a meal together with its insulin (the meal-history Cancel button)', () => {
+    const rigWith = async (): Promise<Rig> => {
+      const rig = makeRig({ glucose: 150, baseline: () => 150 });
+      await setTestTherapy(rig);
+      return rig;
+    };
+    const revisions = async (rig: Rig, type: 'meal' | 'insulin', id: string): Promise<{ revision: number; reason: string }[]> =>
+      (await rig.db.query<{ revision: number; reason: string }>('SELECT revision, reason FROM event_revisions WHERE entity_type = $1 AND entity_id = $2 ORDER BY revision', [type, id])).rows;
+
+    it('removes the meal and the dose named against it in one step, keeps both with their history, leaves unrelated insulin alone', async () => {
+      const rig = await rigWith();
+      const t = nowSec();
+      const meal = await rig.api.addMeal({ clientId: 'cp-meal-00000001', eatenAt: iso(t - 600), carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: 'cp-dose-00000001', administeredAt: iso(t - 570), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual', mealId: meal.meal!.id });
+      const unrelated = await rig.api.addInsulin({ clientId: 'cp-corr-00000001', administeredAt: iso(t - 4 * 3600), kind: 'correction', confirmation: 'confirmed', unitsAdministered: 2, source: 'manual' });
+      expect(ok(unrelated.forecast).mealAware.events.filter((e) => e.role === 'used').map((e) => e.id)).toContain(meal.meal!.id);
+
+      const out = await rig.api.cancelMeal(meal.meal!.id, { expectedRevision: 1 });
+      expect(out.result).toBe('updated');
+      expect(out.meal).toMatchObject({ id: meal.meal!.id, status: 'cancelled', revision: 2 });
+      expect(out.insulin).toHaveLength(1);
+      expect(out.insulin[0]).toMatchObject({ id: dose.insulin!.id, status: 'cancelled', revision: 2, unitsTaken: 6 });
+      const f = ok(out.forecast);
+      expect(f.mealAware.events.map((e) => e.id)).toEqual([unrelated.insulin!.id]); // the meal and its dose are gone from the forecast, the unrelated correction stays
+      expect(f.mealAware.availability.carbsOnBoardGrams).toBeNull();
+
+      // nothing was deleted: rows and one revision each, with the reason
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM meal_events WHERE user_id = $1', [rig.userId])).toBe(1);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM insulin_events WHERE user_id = $1', [rig.userId])).toBe(2);
+      expect(await revisions(rig, 'meal', meal.meal!.id)).toEqual([{ revision: 2, reason: 'user_cancel' }]);
+      expect(await revisions(rig, 'insulin', dose.insulin!.id)).toEqual([{ revision: 2, reason: 'user_cancel_with_meal' }]);
+      expect(await revisions(rig, 'insulin', unrelated.insulin!.id)).toEqual([]);
+      // gone from the lists
+      const recent = await rig.api.recent(6);
+      expect(recent.meals).toEqual([]);
+      expect(recent.insulin.map((i) => i.id)).toEqual([unrelated.insulin!.id]);
+      expect(await rig.forecast.mealCoverage(meal.meal!.id)).toBeNull();
+    });
+
+    it('also removes the dose the system pairs with the meal by time, but not one that could belong to two meals or is far away', async () => {
+      const rig = await rigWith();
+      const t = nowSec();
+      const a = await rig.api.addMeal({ clientId: 'cp-auto-meal-0001', eatenAt: iso(t - 900), carbsG: 50 });
+      const paired = await rig.api.addInsulin({ clientId: 'cp-auto-dose-0001', administeredAt: iso(t - 880), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 5, source: 'manual' }); // no mealId
+      const far = await rig.api.addInsulin({ clientId: 'cp-far-dose-00001', administeredAt: iso(t - 3 * 3600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 3, source: 'manual' });
+      expect(await rig.forecast.mealCoverage(a.meal!.id)).toMatchObject({ insulinRecord: 'linked', insulinUnits: 5 }); // what the screen shows...
+      const out = await rig.api.cancelMeal(a.meal!.id, {});
+      expect(out.insulin.map((i) => [i.id, i.unitsTaken])).toEqual([[paired.insulin!.id, 5]]); // ...is what gets removed
+      expect((await rig.api.recent(6)).insulin.map((i) => i.id)).toEqual([far.insulin!.id]);
+
+      // two meals close together with one dose between them: the dose could belong to either, so it is NOT removed
+      const rig2 = await rigWith();
+      const b = await rig2.api.addMeal({ clientId: 'cp-amb-meal-0001', eatenAt: iso(t - 600), carbsG: 40 });
+      await rig2.api.addMeal({ clientId: 'cp-amb-meal-0002', eatenAt: iso(t - 240), carbsG: 30 });
+      const between = await rig2.api.addInsulin({ clientId: 'cp-amb-dose-0001', administeredAt: iso(t - 420), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual' });
+      const cb = await rig2.api.cancelMeal(b.meal!.id, {});
+      expect(cb.result).toBe('updated');
+      expect(cb.insulin).toEqual([]);
+      expect((await rig2.api.recent(6)).insulin.map((i) => i.id)).toEqual([between.insulin!.id]);
+    });
+
+    it('a confirmed "I took none" record goes with its meal', async () => {
+      const rig = await rigWith();
+      const { m, z } = await addMealAndZero(rig, 40, 5);
+      const out = await rig.api.cancelMeal(m.meal!.id, {});
+      expect(out.insulin.map((i) => [i.id, i.unitsTaken])).toEqual([[z.insulin!.id, 0]]);
+      expect(ok(out.forecast).mealAware.availability.insulin).toBe('none_recorded'); // nothing says "none taken" any more
+    });
+
+    it('includeInsulin: false removes only the meal; calling again removes the dose still named against it; then it is "unchanged"', async () => {
+      const rig = await rigWith();
+      const t = nowSec();
+      const meal = await rig.api.addMeal({ clientId: 'cp-opt-meal-0001', eatenAt: iso(t - 600), carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: 'cp-opt-dose-0001', administeredAt: iso(t - 570), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual', mealId: meal.meal!.id });
+      const only = await rig.api.cancelMeal(meal.meal!.id, { includeInsulin: false });
+      expect(only.result).toBe('updated');
+      expect(only.insulin).toEqual([]);
+      expect(ok(only.forecast).mealAware.events).toEqual([expect.objectContaining({ id: dose.insulin!.id, role: 'used', reason: 'dose_without_recorded_meal' })]); // the dose now stands alone and still acts
+
+      const rest = await rig.api.cancelMeal(meal.meal!.id, { expectedRevision: 1 }); // an old revision is fine once the meal is already removed
+      expect(rest.result).toBe('updated');
+      expect(rest.insulin.map((i) => i.id)).toEqual([dose.insulin!.id]);
+      expect(ok(rest.forecast).mealAware.events).toEqual([]);
+
+      const again = await rig.api.cancelMeal(meal.meal!.id, {});
+      expect(again.result).toBe('unchanged');
+      expect(again.insulin).toEqual([]);
+      expect(ok(again.forecast).status).toBe('ok');
+      expect(await revisions(rig, 'meal', meal.meal!.id)).toHaveLength(1); // repeats add no history
+      expect(await revisions(rig, 'insulin', dose.insulin!.id)).toHaveLength(1);
+    });
+
+    it('a stale revision on a live meal changes nothing; an unknown meal is not found; a never-confirmed scan and its named dose go together', async () => {
+      const rig = await rigWith();
+      const t = nowSec();
+      const meal = await rig.api.addMeal({ clientId: 'cp-conf-meal-0001', eatenAt: iso(t - 600), carbsG: 60 });
+      const dose = await rig.api.addInsulin({ clientId: 'cp-conf-dose-0001', administeredAt: iso(t - 570), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual', mealId: meal.meal!.id });
+      const stale = await rig.api.cancelMeal(meal.meal!.id, { expectedRevision: 9 });
+      expect(stale).toMatchObject({ result: 'conflict', insulin: [], forecast: null });
+      expect((await rig.api.recent(6)).meals.map((m) => m.id)).toEqual([meal.meal!.id]);
+      expect((await rig.api.recent(6)).insulin.map((i) => i.id)).toEqual([dose.insulin!.id]);
+      expect(await rig.api.cancelMeal('00000000-0000-4000-8000-000000000001', {})).toMatchObject({ result: 'not_found', meal: null, insulin: [], forecast: null });
+
+      const rig2 = await rigWith();
+      const draftId = ((await mealService(rig2, [{ kind: 'raw', rawText: detectedRaw }]).analyzeMeal(photo)) as { mealEventId: string }).mealEventId;
+      const namedDose = await rig2.api.addInsulin({ clientId: 'cp-draft-dose-001', administeredAt: iso(nowSec() - 30), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 4, source: 'manual', mealId: draftId });
+      const out = await rig2.api.cancelMeal(draftId, {});
+      expect(out.result).toBe('updated');
+      expect(out.insulin.map((i) => i.id)).toEqual([namedDose.insulin!.id]);
+      expect((await rig2.api.recent(6)).insulin).toEqual([]);
+    });
+  });
+
   describe('unconfirmed meals never count, and the preview shows what a meal would do', () => {
     const scan = async (rig: Rig, raw = detectedRaw): Promise<string> =>
       ((await mealService(rig, [{ kind: 'raw', rawText: raw }]).analyzeMeal(photo)) as { mealEventId: string }).mealEventId;

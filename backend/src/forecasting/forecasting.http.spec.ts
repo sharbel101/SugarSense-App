@@ -180,6 +180,33 @@ describe.skipIf(!hasTestDb)('forecasting HTTP routes on PostgreSQL', () => {
     expect(JSON.stringify(w)).not.toMatch(/icr|isf|mCsf|snapshot/i);
   });
 
+  it('POST /events/meals/:id/cancel: removes the meal and its insulin, repeats are 200 unchanged, bad input is refused', async () => {
+    await setTestTherapy(rig);
+    const http = request(app.getHttpServer());
+    const when = iso(nowSec() - 600);
+    const m = await http.post('/events/meals').send({ clientId: 'http-cp-meal-001', eatenAt: when, carbsG: 50 }).expect(201);
+    const d = await http.post('/events/insulin').send({ clientId: 'http-cp-dose-001', administeredAt: when, kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 5, source: 'manual', mealId: m.body.meal.id }).expect(201);
+    const id = m.body.meal.id as string;
+
+    await http.post('/events/meals/not-a-uuid/cancel').send({}).expect(400);
+    await http.post(`/events/meals/${id}/cancel`).send({ everything: true }).expect(400);
+    await http.post(`/events/meals/${id}/cancel`).send({ expectedRevision: 0 }).expect(400);
+    await http.post(`/events/meals/${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}/cancel`).send({}).expect(404);
+    await http.post(`/events/meals/${id}/cancel`).send({ expectedRevision: 9 }).expect(409).expect((r) => expect(r.body.result).toBe('conflict'));
+    expect((await http.get('/events/recent?hours=3').expect(200)).body.meals).toHaveLength(1); // the stale call changed nothing
+
+    const done = await http.post(`/events/meals/${id}/cancel`).expect(200); // an empty body is fine
+    expect(done.headers['cache-control']).toContain('no-store');
+    expect(done.body).toMatchObject({ result: 'updated', meal: { id, status: 'cancelled' } });
+    expect(done.body.insulin).toEqual([expect.objectContaining({ id: d.body.insulin.id, status: 'cancelled', unitsTaken: 5 })]);
+    expect(done.body.forecast.status).toBe('ok');
+    expect(done.body.forecast.mealAware.events).toEqual([]);
+    const again = await http.post(`/events/meals/${id}/cancel`).send({ expectedRevision: 1 }).expect(200);
+    expect(again.body).toMatchObject({ result: 'unchanged', insulin: [] });
+    expect(again.body.forecast.status).toBe('ok');
+    expect((await http.get('/events/recent?hours=3').expect(200)).body).toEqual({ meals: [], insulin: [] });
+  });
+
   it('POST /forecast/preview: what a meal or an insulin amount would do, nothing saved; bad input is refused', async () => {
     await setTestTherapy(rig);
     const http = request(app.getHttpServer());

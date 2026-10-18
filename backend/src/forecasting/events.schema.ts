@@ -107,6 +107,19 @@ export const editInsulinSchema = z
   .refine((v) => Object.keys(v).some((k) => k !== 'expectedRevision'), { message: 'nothing to change' });
 export type EditInsulinInput = z.infer<typeof editInsulinSchema>;
 
+/**
+ * Remove a meal AND the insulin that belongs to it in one step (the meal-history Cancel button). `includeInsulin: false` removes only
+ * the meal. An empty body is fine.
+ */
+export const cancelMealSchema = z
+  .object({
+    expectedRevision: z.number().int().min(1).optional(),
+    includeInsulin: z.boolean().optional(),
+  })
+  .strict()
+  .default({});
+export type CancelMealInput = z.infer<typeof cancelMealSchema>;
+
 export const forecastQuerySchema = z.object({
   horizonMin: z.coerce.number().int().min(5).max(180).optional(),
 });

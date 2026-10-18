@@ -1,11 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DbService, describeDbError } from '../db/db.service.js';
-import type { CreateInsulinInput, CreateMealInput, EditInsulinInput, EditMealInput } from './events.schema.js';
+import type { CancelMealInput, CreateInsulinInput, CreateMealInput, EditInsulinInput, EditMealInput } from './events.schema.js';
 import {
   EventsService,
   type InsulinRow,
   type InsulinWriteResult,
   type MealRow,
+  type MealCancelResult,
   type MealWriteResult,
   type WriteStatus,
 } from './events.service.js';
@@ -101,6 +102,16 @@ export interface MealWriteResponse {
   /** Refreshed forecast; null when the write did not change anything or could not be refreshed. */
   forecast: ForecastDisplay | null;
 }
+export interface MealCancelResponse {
+  result: WriteStatus;
+  /** The meal after the call (cancelled). */
+  meal: MealView | null;
+  /** The insulin entries this call removed (their state after: cancelled). Empty when none belonged to the meal. */
+  insulin: InsulinView[];
+  reason?: string;
+  /** Refreshed forecast (also when the call changed nothing, so a retry still gets one). */
+  forecast: ForecastDisplay | null;
+}
 export interface InsulinWriteResponse {
   result: WriteStatus;
   insulin: InsulinView | null;
@@ -138,6 +149,19 @@ export class EventsApiService {
     const r = await this.events.editMeal(userId, mealId, patch);
     // Withdrawing an entry that is already withdrawn changes nothing, but the repeat (an offline retry) still gets the current forecast.
     return this.finishMeal(r, r.status === 'unchanged' && r.meal?.status === 'cancelled');
+  }
+
+  /** Remove a meal and the insulin that belongs to it in one step (see EventsService.cancelMealWithInsulin). */
+  async cancelMeal(mealId: string, body: CancelMealInput): Promise<MealCancelResponse> {
+    const { userId } = await this.users.primary();
+    const r: MealCancelResult = await this.events.cancelMealWithInsulin(userId, mealId, body);
+    return {
+      result: r.status,
+      meal: r.meal ? toMealView(r.meal) : null,
+      insulin: r.insulin.map(toInsulinView),
+      ...(r.reason ? { reason: r.reason } : {}),
+      forecast: r.status === 'updated' || r.status === 'unchanged' ? await this.refresh() : null,
+    };
   }
 
   async addInsulin(input: CreateInsulinInput): Promise<InsulinWriteResponse> {

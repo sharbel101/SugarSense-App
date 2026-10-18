@@ -1,5 +1,5 @@
 import { HttpException, Inject, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { carbCoverage, linkMealsToInsulin, type LinkableInsulin } from '../engine/coverage.js';
+import { carbCoverage, linkMealsToInsulin } from '../engine/coverage.js';
 import { carbSigmaG, priorBaselineSigma, type ForecastPoint } from '../engine/compose.js';
 import {
   BASELINE_HORIZON_MIN,
@@ -28,6 +28,7 @@ import { PersonalizationService } from './personalization.service.js';
 import { PredictionStore, type EventLinkRecord } from './prediction-store.service.js';
 import { TherapyService, type ResolvedTherapy, type TherapyResolver } from './therapy.service.js';
 import { toIso, toSec } from './time.js';
+import { declaredMealOf, isRapidActing, toLinkable } from './linkable.js';
 import { UsersService } from './users.service.js';
 
 /** Insulin tail (longest allowed duration) plus margin: events older than this cannot still be acting. */
@@ -397,12 +398,7 @@ const toPointDisplay = (anchorSec: number) => (p: ForecastPoint) => ({
   carbsOnBoardGrams: p.carbsOnBoardGrams,
 });
 
-/**
- * A dose the person named a meal for. When that meal does not count - WITHDRAWN (cancelled), or never confirmed (draft) - the naming means
- * nothing yet; typically the photo was scanned again and the first scan replaced - so the dose is read as if no meal had been named: it pairs with a meal
- * logged around it in time (the replacement), or else it is a lone dose. Either way it was taken, so it acts.
- */
-export const declaredMealOf = (i: InsulinRow): string | null => (i.mealNotCounted ? null : i.mealId);
+export { declaredMealOf, isRapidActing, toLinkable } from './linkable.js';
 
 /** A typed meal for a preview: nothing is stored. */
 const adHocMeal = (m: NonNullable<PreviewInput['meal']>, tSec: number): MealRow => ({
@@ -444,19 +440,6 @@ const previewDose = (units: number, tSec: number, meal: MealRow | null): Insulin
   status: 'active',
   mealNotCounted: false,
 });
-
-export const toLinkable = (i: InsulinRow): LinkableInsulin => ({
-  id: i.insulinId,
-  tSec: i.administeredAtSec,
-  unitsAdministered: i.unitsAdministered,
-  kind: i.kind,
-  confirmation: i.confirmation,
-  declaredMealId: declaredMealOf(i),
-  rapidActing: isRapidActing(i.insulinType),
-});
-
-/** Only rapid / ultra-rapid (or unstated) insulin acts through the layer's kernel. */
-export const isRapidActing = (type: string | null): boolean => type === null || type === 'rapid' || type === 'ultra_rapid';
 
 interface Built {
   meals: MealInput[];

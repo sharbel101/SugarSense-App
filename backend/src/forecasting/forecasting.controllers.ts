@@ -25,6 +25,7 @@ import { createRateLimitGuard, envInt } from '../common/rate-limit.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { DbService, describeDbError } from '../db/db.service.js';
 import {
+  cancelMealSchema,
   counterfactualSchema,
   createInsulinSchema,
   previewSchema,
@@ -32,6 +33,7 @@ import {
   editInsulinSchema,
   editMealSchema,
   forecastQuerySchema,
+  type CancelMealInput,
   type CounterfactualInput,
   type PreviewInput,
   type CreateInsulinInput,
@@ -156,6 +158,21 @@ export class EventsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const out = await guarded(this.db, () => this.api.editMeal(id, body));
+    res.status(HTTP_BY_WRITE[out.result]);
+    return out;
+  }
+
+  /**
+   * The Cancel button of the meal history: removes the meal AND the insulin that belongs to it in one step (kept in the history on the
+   * server, no longer used anywhere). `{includeInsulin:false}` removes only the meal. The answer lists the insulin it removed.
+   */
+  @Post('meals/:id/cancel')
+  async cancelMeal(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(cancelMealSchema)) body: CancelMealInput,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const out = await guarded(this.db, () => this.api.cancelMeal(id, body));
     res.status(HTTP_BY_WRITE[out.result]);
     return out;
   }
