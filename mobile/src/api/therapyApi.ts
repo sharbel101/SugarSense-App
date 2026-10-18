@@ -214,10 +214,10 @@ export function validateTherapyForm(
     const row = errors.rows[i];
     const s = starts[i];
     if (s === null) {
-      row.startTime = 'Enter the time as HH:MM, for example 07:30.';
+      row.startTime = 'Enter the time like 7:30 AM.';
       mark();
     } else if (i === 0 && s !== 0) {
-      row.startTime = 'The first time of day must start at 00:00.';
+      row.startTime = 'The first time of day must start at 12:00 AM.';
       mark();
     } else if (i > 0 && starts[i - 1] !== null && s <= (starts[i - 1] as number)) {
       row.startTime = 'Each time must be later than the one above.';

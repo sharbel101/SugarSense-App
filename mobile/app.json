@@ -31,13 +31,17 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "SugarSense needs camera access to photograph your meals for carb estimation."
+          "cameraPermission": "SugarSense needs camera access to photograph your meals for carb estimation.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "SugarSense needs photo library access so you can pick an existing meal photo."
+          "photosPermission": "SugarSense needs photo library access so you can pick an existing meal photo.",
+          "cameraPermission": "SugarSense needs camera access to photograph your meals for carb estimation.",
+          "microphonePermission": false
         }
       ]
     ]

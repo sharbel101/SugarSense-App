@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Polygon, Polyline } from 'react-native-svg';
 import { monotonePath, polylinePath } from '../services/chartPath';
+import { formatTime12 } from '../services/clock12';
 import { nearestForecastPoint, type ForecastPoint } from '../services/glucoseChart';
 import type { EventMarker } from '../services/forecastChart';
 import { touch, useColors } from '../theme';
@@ -343,7 +344,7 @@ export function GlucoseChart({
           }}
         >
           <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink }}>
-            {new Date(scrub.timeMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ·{' '}
+            {formatTime12(new Date(scrub.timeMs))} ·{' '}
             {Math.round(scrub.value)} mg/dL
           </Text>
           <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>

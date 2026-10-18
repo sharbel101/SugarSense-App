@@ -43,10 +43,7 @@ export const ON_BOARD_EXPLAINER =
   'Insulin on board is the part of the doses you logged that is still to act, from a standard action curve. ' +
   'Carbs on board is the part of logged meals not yet absorbed. Estimates from your entries only.';
 
-export type PromptKind =
-  | 'set_ratio'
-  | 'meal_without_insulin'
-  | 'dose_ambiguous';
+export type PromptKind = 'set_ratio' | 'meal_without_insulin';
 
 export type ForecastPrompt = {
   kind: PromptKind;
@@ -75,12 +72,8 @@ export function forecastPrompts(f: ForecastOkDisplay): ForecastPrompt[] {
       eventId: meal?.id ?? null,
     });
   }
-  // A dose with no meal recorded is not prompted: it is a normal case (a correction, a snack) and the
-  // server already widens the range for it.
-  const ambiguous = f.mealAware.events.find((e) => e.reason === 'insulin_link_ambiguous');
-  if (ambiguous) {
-    out.push({ kind: 'dose_ambiguous', text: 'A dose could belong to two meals - tell us which.', eventId: ambiguous.id });
-  }
+  // A dose with no meal recorded, or a dose that could belong to two meals, is not prompted: the server
+  // already widens the range for those, and a prompt about them only adds noise.
   return out;
 }
 

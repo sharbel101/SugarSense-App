@@ -7,8 +7,10 @@
  * is expressed by omitting a field (never by 0), and an AI-produced carb number keeps its original
  * estimate next to the person's correction.
  *
- * No imports, so plain-Node tests can run it.
+ * Imports only other pure modules, so plain-Node tests can run it.
  */
+
+import { formatIsoTime12 } from './clock12.ts';
 
 export type InsulinType = 'rapid' | 'ultra_rapid' | 'short' | 'long' | 'other';
 export const INSULIN_TYPES: { value: InsulinType; label: string }[] = [
@@ -132,27 +134,26 @@ export function resolveEventTime(choice: TimeChoice, now: Date): ResolvedTime | 
     return { utcIso: new Date(now.getTime() - choice.minutes * 60_000).toISOString(), utcOffsetMin };
   }
   const match = /^(\d{1,2}):(\d{2})$/.exec(choice.hhmm.trim());
-  if (!match) return { error: 'Enter the time as HH:MM, for example 14:30.' };
+  if (!match) return { error: 'Enter the time like 2:30 PM.' };
   const h = Number(match[1]);
   const m = Number(match[2]);
-  if (h > 23 || m > 59) return { error: 'Enter a valid time, for example 14:30.' };
+  if (h > 23 || m > 59) return { error: 'Enter a valid time, like 2:30 PM.' };
   const at = new Date(now);
   at.setHours(h, m, 0, 0);
   if (at.getTime() > now.getTime()) at.setDate(at.getDate() - 1);
   return { utcIso: at.toISOString(), utcOffsetMin };
 }
 
-/** 24-hour "HH:MM" in local time, the format the typed-time field expects. */
+/** 24-hour "HH:MM" in local time: how a time is held inside the app (the field shows it as 12-hour). */
 export function toHhmm(utcIso: string): string {
   const d = new Date(utcIso);
   if (!Number.isFinite(d.getTime())) return '';
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** Local time as "2:30 PM", whatever the phone's region setting. */
 export function formatEventTime(utcIso: string): string {
-  const d = new Date(utcIso);
-  if (!Number.isFinite(d.getTime())) return '';
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return formatIsoTime12(utcIso);
 }
 
 // ---------------------------------------------------------------------------------- validation

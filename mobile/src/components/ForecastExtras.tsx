@@ -127,9 +127,7 @@ export function ForecastPrompts({ forecast }: { forecast: ForecastOkDisplay }) {
             ? { label: 'Settings', run: () => nav.navigate('InsulinSettings' as never) }
             : warning
               ? { label: 'Add insulin', run: () => open(meal ? { mode: 'insulin', meal } : { mode: 'insulin' }) }
-              : p.kind === 'dose_ambiguous'
-                ? { label: 'Review', run: () => open({ mode: 'list' }) }
-                : null;
+              : null;
         return (
           <View
             key={p.kind}

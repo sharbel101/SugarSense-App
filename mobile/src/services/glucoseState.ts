@@ -1,4 +1,5 @@
 import type { GlucoseFetchOutcome, GlucoseOk } from '../api/glucoseContract';
+import { formatIsoTime12 } from './clock12.ts';
 
 /**
  * Pure state mapping for the live glucose reading. No React, no I/O, so it can be unit-tested
@@ -105,9 +106,7 @@ export function formatAge(minutes: number): string {
   return rem === 0 ? `${h} h ago` : `${h} h ${rem} min ago`;
 }
 
-/** Local wall-clock HH:MM for an ISO UTC string. Times arrive UTC; formatting is local. */
+/** Local wall-clock time as "2:30 PM" for an ISO UTC string. Times arrive UTC; formatting is local. */
 export function formatClock(iso: string): string {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '';
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return formatIsoTime12(iso);
 }

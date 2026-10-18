@@ -21,6 +21,7 @@ import {
   validateMeal,
   type AbsorptionClass,
 } from '../services/events';
+import { formatTime12 } from '../services/clock12';
 import { useEvents } from '../services/EventsProvider';
 import { mealChoices, type MealRef } from '../services/mealRefs';
 import { radius, touch, useColors } from '../theme';
@@ -244,7 +245,7 @@ export function InsulinForm({ onDone, onBack, preselectMeal, initialKind }: { on
     () => [
       { value: '', label: 'No meal / not sure' },
       ...(preselectMeal && !choices.some((c) => c.key === preselectMeal.key) ? [{ value: preselectMeal.key, label: preselectMeal.label }] : []),
-      ...choices.map((c) => ({ value: c.key, label: `${c.label} (${new Date(c.occurredAtUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })})` })),
+      ...choices.map((c) => ({ value: c.key, label: `${c.label} (${formatTime12(new Date(c.occurredAtUtc))})` })),
     ],
     [choices, preselectMeal],
   );

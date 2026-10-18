@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { radius, touch, useColors } from '../theme';
+import { hhmmTo12, parseClock12, type Meridiem } from '../services/clock12';
 import { TimeChoice } from '../services/events';
 import { Icon } from './Icon';
 
@@ -117,6 +118,92 @@ export function ChoiceChips<T extends string | number>({
   );
 }
 
+const MERIDIEMS: { value: Meridiem; label: string }[] = [
+  { value: 'AM', label: 'AM' },
+  { value: 'PM', label: 'PM' },
+];
+
+/**
+ * A 12-hour time field: the time typed as "2:30" plus AM / PM buttons (a typed "2:30 pm" or "14:30" also works).
+ * Reports the 24-hour "HH:MM" the app holds internally, or the raw text while it is not yet a valid time so
+ * validation can say so. The field starts from `hhmm` (24-hour) when it is a valid time.
+ */
+export function Time12Field({
+  label,
+  hhmm,
+  onChangeHhmm,
+  error,
+  placeholder = '2:30',
+}: {
+  label: string;
+  hhmm: string;
+  onChangeHhmm: (hhmm: string) => void;
+  error?: string;
+  placeholder?: string;
+}) {
+  const colors = useColors();
+  const initial = hhmmTo12(hhmm);
+  const [typed, setTyped] = useState(initial ? initial.text : hhmm);
+  const [meridiem, setMeridiem] = useState<Meridiem>(initial ? initial.meridiem : new Date().getHours() < 12 ? 'AM' : 'PM');
+
+  const commit = (text: string, chosen: Meridiem) => {
+    const parsed = parseClock12(text, chosen);
+    if (parsed.ok) {
+      if (parsed.meridiem !== chosen) setMeridiem(parsed.meridiem);
+      onChangeHhmm(parsed.hhmm);
+    } else {
+      onChangeHhmm(text);
+    }
+  };
+
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <TextInput
+          value={typed}
+          onChangeText={(t) => {
+            setTyped(t);
+            commit(t, meridiem);
+          }}
+          placeholder={placeholder}
+          placeholderTextColor={colors.ink3}
+          keyboardType="numbers-and-punctuation"
+          maxLength={8}
+          accessibilityLabel={label}
+          aria-invalid={!!error}
+          style={{
+            flex: 1,
+            minWidth: 80,
+            minHeight: touch.min,
+            fontFamily: 'Manrope_600SemiBold',
+            fontSize: 16,
+            color: colors.ink,
+            borderWidth: 1,
+            borderColor: error ? colors.red600 : colors.border,
+            borderRadius: radius.chip,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+          }}
+        />
+        <ChoiceChips
+          options={MERIDIEMS}
+          value={meridiem}
+          onChange={(m) => {
+            setMeridiem(m);
+            commit(typed, m);
+          }}
+        />
+      </View>
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.red600 }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const MINUTES_AGO: { value: number | 'clock'; label: string }[] = [
   { value: 0, label: 'Now' },
   { value: 15, label: '15 min ago' },
@@ -126,7 +213,7 @@ const MINUTES_AGO: { value: number | 'clock'; label: string }[] = [
   { value: 'clock', label: 'Other time' },
 ];
 
-/** When it happened: defaults to now; quick past offsets or a typed HH:MM (today, else yesterday). */
+/** When it happened: defaults to now; quick past offsets or a typed 12-hour time (today, else yesterday). */
 export function EventTimePicker({
   value,
   hhmm,
@@ -152,15 +239,13 @@ export function EventTimePicker({
         onChange={(v) => onChange(v === 'clock' ? { mode: 'clock', hhmm } : { mode: 'minutesAgo', minutes: v })}
       />
       {value.mode === 'clock' ? (
-        <FormField
-          label="Time (24 h, local)"
-          value={hhmm}
-          onChangeText={(t) => {
+        <Time12Field
+          label="Time"
+          hhmm={hhmm}
+          onChangeHhmm={(t) => {
             onChangeHhmm(t);
             onChange({ mode: 'clock', hhmm: t });
           }}
-          placeholder="14:30"
-          keyboardType="numbers-and-punctuation"
           error={error}
         />
       ) : error ? (

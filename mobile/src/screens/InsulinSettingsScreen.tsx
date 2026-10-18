@@ -15,8 +15,9 @@ import {
 } from '../api/therapyApi';
 import { BackButton, PrimaryButton, SecondaryButton } from '../components/Buttons';
 import { Card } from '../components/Card';
-import { ChoiceChips, FormField } from '../components/FormField';
+import { ChoiceChips, FormField, Time12Field } from '../components/FormField';
 import { RootStackParamList } from '../navigation/types';
+import { formatHhmm12 } from '../services/clock12';
 import { parseTargetGlucose, useTargetGlucose } from '../services/targetGlucose';
 import { useKeyboardInset } from '../services/useKeyboardInset';
 import { radius, spacing, useColors } from '../theme';
@@ -206,14 +207,14 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
               {showMore || rows.length > 1 || extraRowErrors ? (
                 <View style={{ gap: 14 }}>
                   <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
-                    The first row above applies from 00:00. Add a time of day if your ratio changes during the day.
+                    The first row above applies from 12:00 AM. Add a time of day if your ratio changes during the day.
                   </Text>
                   {rows.slice(1).map((r, k) => {
                     const i = k + 1;
                     return (
                       <Card key={i}>
                         <View style={{ gap: 12 }}>
-                          <FormField label="From (24 h)" value={r.startTime} onChangeText={(t) => setRow(i, { startTime: t })} placeholder="12:00" keyboardType="numbers-and-punctuation" error={errors?.rows[i]?.startTime} />
+                          <Time12Field label="From" hhmm={r.startTime} onChangeHhmm={(t) => setRow(i, { startTime: t })} placeholder="12:00" error={errors?.rows[i]?.startTime} />
                           <FormField label="1 unit covers" required value={r.icr} onChangeText={(t) => setRow(i, { icr: t })} unit="g" keyboardType="decimal-pad" error={errors?.rows[i]?.icr} />
                           <FormField label="Correction factor (optional)" value={r.isf} onChangeText={(t) => setRow(i, { isf: t })} unit="mg/dL" keyboardType="decimal-pad" error={errors?.rows[i]?.isf} />
                           <SecondaryButton label="Remove this time of day" onPress={() => setRows((x) => x.filter((_, j) => j !== i))} />
@@ -274,11 +275,11 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
                     Version {h.version} · from {fmt(h.effectiveFrom)}
                   </Text>
                   <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
-                    {h.icrSegments.map((s) => `${s.startTime}: 1 U : ${s.gramsPerUnit} g`).join(' · ')}
+                    {h.icrSegments.map((s) => `${formatHhmm12(s.startTime)}: 1 U : ${s.gramsPerUnit} g`).join(' · ')}
                   </Text>
                   {h.isfSegments.length > 0 ? (
                     <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>
-                      {h.isfSegments.map((s) => `${s.startTime}: ${s.mgdlPerUnit} mg/dL per U`).join(' · ')}
+                      {h.isfSegments.map((s) => `${formatHhmm12(s.startTime)}: ${s.mgdlPerUnit} mg/dL per U`).join(' · ')}
                     </Text>
                   ) : null}
                 </View>

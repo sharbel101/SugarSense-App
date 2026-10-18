@@ -52,6 +52,7 @@
     "test:keyboard": "node --no-warnings --experimental-strip-types --test tests/keyboardInset.test.mjs",
     "test:chart": "node --no-warnings --experimental-strip-types --test tests/chart.test.mjs",
     "test:dose": "node --no-warnings --experimental-strip-types --test tests/doseEstimate.test.mjs",
+    "test:clock": "node --no-warnings --experimental-strip-types --test tests/clock12.test.mjs",
     "test:pull": "node --no-warnings --experimental-strip-types --test tests/pullToRefresh.test.mjs",
     "test:headers": "node --no-warnings --experimental-strip-types --test tests/requestHeaders.test.mjs",
     "test:update": "node --no-warnings --experimental-strip-types --test tests/webUpdate.test.mjs",
