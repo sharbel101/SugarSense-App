@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { beginCapture } from '../services/captureMeal';
 import { shadow, useColors, withAlpha } from '../theme';
 import { Icon, IconName } from './Icon';
 
@@ -213,7 +214,12 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           style={{ position: 'absolute', top: FAB_TOP, left: 0, right: 0, alignItems: 'center', pointerEvents: 'box-none' }}
         >
           <Pressable
-            onPress={() => press(actionRoute.key, actionRoute.name, actionFocused)}
+            onPress={() => {
+              // Open the camera right here, inside the tap: a phone browser only allows it from the tap itself.
+              const here = state.routes[state.index].name;
+              beginCapture('camera', { returnTab: here === ACTION_ROUTE ? 'Home' : here, returnOnCancel: true });
+              press(actionRoute.key, actionRoute.name, actionFocused);
+            }}
             accessibilityRole="button"
             accessibilityLabel="Scan a meal"
             style={({ pressed }) => [

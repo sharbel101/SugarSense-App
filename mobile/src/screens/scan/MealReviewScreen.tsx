@@ -11,6 +11,7 @@ import { LoadingWords } from '../../components/LoadingWords';
 import { PixelMascot } from '../../components/PixelMascot';
 import { ScanScreenProps } from '../../navigation/types';
 import { useQuickAdd } from '../../components/QuickAdd';
+import { beginCapture } from '../../services/captureMeal';
 import { useEvents } from '../../services/EventsProvider';
 import { useKeyboardInset } from '../../services/useKeyboardInset';
 import {
@@ -375,9 +376,18 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
         <Footer
           state={showLoading ? { kind: 'uploading' } : state}
           manualGramsValid={manualGramsValid}
-          onRetake={() => navigation.goBack()}
+          onRetake={() => {
+            // Open the camera again right away (inside the tap), then go back to the scan screen.
+            beginCapture('camera');
+            navigation.goBack();
+          }}
           onRetry={retry}
-          onCancel={() => navigation.goBack()}
+          onCancel={() => {
+            // An unconfirmed scan is never counted by the server, so this is only tidying: a failure changes nothing.
+            const draftId = state.kind === 'result' ? (state.analysis.mealEventId ?? null) : state.kind === 'needs_manual_entry' ? state.mealEventId : null;
+            if (draftId && !confirmedRef.current) void editMeal(draftId, { status: 'cancelled' });
+            navigation.goBack();
+          }}
           confirming={confirming}
           message={confirmMessage}
           onConfirmResult={(analysis) => void confirm(analysis, analysis.mealEventId ?? null)}

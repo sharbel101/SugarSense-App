@@ -22,6 +22,10 @@ export interface ForecastPointDisplay {
   high: number;
   /** True after the glucose-only model's horizon: only logged events move the line. */
   extension: boolean;
+  /** Insulin still to act at this point (units), from the server; null = not supplied, never 0. */
+  insulinOnBoardUnits: number | null;
+  /** Carbs not yet absorbed at this point (grams), from the server; null = not supplied, never 0. */
+  carbsOnBoardGrams: number | null;
 }
 
 export interface ForecastEventDisplay {
@@ -132,7 +136,11 @@ function parsePoints(v: unknown): ForecastPointDisplay[] | null {
     if (low > high) return null;
     // Every 5 minutes, starting at +5: anything else is not this contract.
     if (minutes !== (i + 1) * 5) return null;
-    out.push({ minutes, time: p.time, baseline, adjusted, low, high, extension: p.extension });
+    // On-board amounts: an older server omits them (null); present-and-garbage rejects the whole answer.
+    const iob = p.insulinOnBoardUnits === undefined || p.insulinOnBoardUnits === null ? null : num(p.insulinOnBoardUnits);
+    const cob = p.carbsOnBoardGrams === undefined || p.carbsOnBoardGrams === null ? null : num(p.carbsOnBoardGrams);
+    if ((p.insulinOnBoardUnits !== undefined && p.insulinOnBoardUnits !== null && iob === null) || (p.carbsOnBoardGrams !== undefined && p.carbsOnBoardGrams !== null && cob === null)) return null;
+    out.push({ minutes, time: p.time, baseline, adjusted, low, high, extension: p.extension, insulinOnBoardUnits: iob, carbsOnBoardGrams: cob });
   }
   return out;
 }

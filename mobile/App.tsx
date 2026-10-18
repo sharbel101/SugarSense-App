@@ -14,6 +14,7 @@ import { QuickAddProvider } from './src/components/QuickAdd';
 import { EventsProvider } from './src/services/EventsProvider';
 import { ForecastProvider } from './src/services/ForecastProvider';
 import { GlucoseProvider } from './src/services/GlucoseProvider';
+import { RiskAlertsProvider } from './src/services/RiskAlertsProvider';
 import { startWebUpdateWatcher } from './src/services/webUpdate';
 import { ThemeProvider, useTheme } from './src/theme';
 
@@ -53,12 +54,14 @@ export default function App() {
         <ThemedStatusBar />
         <GlucoseProvider>
           <ForecastProvider>
-            <EventsProvider>
-              <QuickAddProvider>
-                <RootNavigator />
-              </QuickAddProvider>
-            </EventsProvider>
-            </ForecastProvider>
+            <RiskAlertsProvider>
+              <EventsProvider>
+                <QuickAddProvider>
+                  <RootNavigator />
+                </QuickAddProvider>
+              </EventsProvider>
+            </RiskAlertsProvider>
+          </ForecastProvider>
         </GlucoseProvider>
       </ThemeProvider>
     </SafeAreaProvider>

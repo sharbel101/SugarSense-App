@@ -13,3 +13,11 @@ export function goToScan(): void {
 export function goToInsulinSettings(): void {
   if (navRef.isReady()) (navRef.navigate as (...a: unknown[]) => void)('InsulinSettings');
 }
+
+/** The tab the person is on right now ('Home' while the Scan flow itself is showing). */
+export function currentTabName(): string {
+  if (!navRef.isReady()) return 'Home';
+  const tabs = navRef.getRootState()?.routes.find((r) => r.name === 'Tabs')?.state;
+  const name = tabs?.routes[tabs.index ?? 0]?.name;
+  return name && name !== 'Scan' ? name : 'Home';
+}

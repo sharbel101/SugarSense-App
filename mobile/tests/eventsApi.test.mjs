@@ -279,6 +279,18 @@ test('therapy API: not_set view parses; PUT 400 surfaces the server text; 404 = 
   assert.match(rejected.reason, /too big/);
 });
 
+test('therapy save sends the device time zone so time-of-day ratios are read in the right zone', async () => {
+  const sent = [];
+  const fetchImpl = async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return { status: 400, json: async () => ({ message: 'x' }) };
+  };
+  await putTherapySettings({ baseUrl: '', fetchImpl }, { icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], source: 'user_entered' });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  assert.equal(sent[0].icrSegments[0].gramsPerUnit, 10, 'the rest of the body is untouched');
+});
+
 // --------------------------------------------------------------------------------- wording lint
 
 import { readFileSync, readdirSync } from 'node:fs';

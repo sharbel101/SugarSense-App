@@ -135,10 +135,23 @@ export interface TherapyPutBody {
   source: TherapySource;
   effectiveFrom?: string;
   note?: string;
+  /** IANA zone the time-of-day segments are read in, e.g. "Asia/Beirut". Added from the device on every save. */
+  timezone?: string;
+}
+
+/** The device's IANA time zone, or undefined when it cannot be read (the server then keeps its own). */
+export function deviceTimeZone(): string | undefined {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === 'string' && zone !== '' ? zone : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function putTherapySettings(ctx: ApiContext, body: TherapyPutBody): Promise<TherapyOutcome<TherapySettingsView>> {
-  const r = await call(ctx, 'PUT', '/therapy/settings', body);
+  const timezone = deviceTimeZone();
+  const r = await call(ctx, 'PUT', '/therapy/settings', timezone ? { ...body, timezone } : body);
   if (!r) return { kind: 'unavailable' };
   if (r.status === 400 || r.status === 422) {
     const m = isRec(r.json) ? r.json.message : null;

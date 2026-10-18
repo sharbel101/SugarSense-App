@@ -8,8 +8,10 @@ import type { GlucoseOk } from '../api/glucoseContract';
 import { describeForecastForScreenReader, buildForecastChart, type EventMarker, type ForecastChartModel } from '../services/forecastChart';
 import { useEvents } from '../services/EventsProvider';
 import { useForecast } from '../services/ForecastProvider';
-import { forecastPrompts, formatCarbsOnBoard, formatInsulinOnBoard, ON_BOARD_EXPLAINER, type OnBoardChip } from '../services/forecastView';
+import { forecastPrompts, formatCarbsOnBoard, formatInsulinOnBoard, type OnBoardChip } from '../services/forecastView';
+import { formatTime12 } from '../services/clock12';
 import { findMealRef } from '../services/mealRefs';
+import { insulinSourceRows, mealSourceRows, SOURCE_WINDOW_HOURS, type SourceRow } from '../services/onBoardSources';
 import { formatClock } from '../services/glucoseState';
 import { radius, touch, useColors } from '../theme';
 import { useQuickAdd } from './QuickAdd';
@@ -71,7 +73,7 @@ function Chip({ chip, onPress, active }: { chip: OnBoardChip; onPress: () => voi
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${chip.label}: ${chip.value}, ${chip.caption}. Tap for an explanation.`}
+      accessibilityLabel={`${chip.label}: ${chip.value}, ${chip.caption}. Tap to see where it comes from.`}
       aria-expanded={active}
       style={{
         flex: 1,
@@ -80,8 +82,8 @@ function Chip({ chip, onPress, active }: { chip: OnBoardChip; onPress: () => voi
         paddingVertical: 8,
         borderRadius: radius.row,
         backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
+        borderWidth: active ? 2 : 1,
+        borderColor: active ? colors.blue600 : colors.border,
       }}
     >
       <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.ink2 }}>{chip.label}</Text>
@@ -91,18 +93,102 @@ function Chip({ chip, onPress, active }: { chip: OnBoardChip; onPress: () => voi
   );
 }
 
-/** Insulin and carbs on board at the latest reading, straight from the server (null = unknown, never 0). */
+/**
+ * Insulin and carbs on board at the latest reading, straight from the server (null = unknown, never 0).
+ * Tapping a chip lists where the number comes from: the doses taken and the carbs entered in the last
+ * 12 hours, newest first, with how the forecast used each one.
+ */
 export function OnBoardChips({ forecast }: { forecast: ForecastOkDisplay }) {
   const colors = useColors();
-  const [open, setOpen] = useState(false);
+  const { recent, refreshRecent } = useEvents();
+  const { open: openSheet } = useQuickAdd();
+  const [openChip, setOpenChip] = useState<'insulin' | 'carbs' | null>(null);
+  // The moment the list was opened: "3 h ago" is worked out from it, and it is set from the tap, not from render.
+  const [openedAtMs, setOpenedAtMs] = useState(() => Date.now());
   const a = forecast.mealAware.availability;
+  const toggle = (which: 'insulin' | 'carbs') => {
+    if (openChip !== which) {
+      refreshRecent();
+      setOpenedAtMs(Date.now());
+    }
+    setOpenChip((current) => (current === which ? null : which));
+  };
+
+  const rows: SourceRow[] =
+    openChip === null || recent.kind !== 'ok'
+      ? []
+      : openChip === 'insulin'
+        ? insulinSourceRows(recent.insulin, forecast.mealAware.events, openedAtMs)
+        : mealSourceRows(recent.meals, forecast.mealAware.events, openedAtMs);
+  const insulinChip = formatInsulinOnBoard(a);
+  const carbsChip = formatCarbsOnBoard(a);
+  const noun = openChip === 'insulin' ? 'doses' : 'meals';
+
   return (
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Chip chip={formatInsulinOnBoard(a)} onPress={() => setOpen((v) => !v)} active={open} />
-        <Chip chip={formatCarbsOnBoard(a)} onPress={() => setOpen((v) => !v)} active={open} />
+        <Chip chip={insulinChip} onPress={() => toggle('insulin')} active={openChip === 'insulin'} />
+        <Chip chip={carbsChip} onPress={() => toggle('carbs')} active={openChip === 'carbs'} />
       </View>
-      {open ? <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>{ON_BOARD_EXPLAINER}</Text> : null}
+      {openChip !== null ? (
+        <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.row, padding: 14, gap: 10 }}>
+          <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink }}>
+            {openChip === 'insulin' ? 'Doses you logged' : 'Carbs you entered'} · last {SOURCE_WINDOW_HOURS} hours
+          </Text>
+          <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
+            {openChip === 'insulin'
+              ? 'Insulin on board is the part of the doses you logged that is still to act, estimated by the server from a standard action curve.'
+              : 'Carbs on board is the part of the meals you entered that is not yet absorbed, estimated by the server from your entries.'}
+          </Text>
+          {recent.kind === 'ok' && rows.length === 0 ? (
+            <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, lineHeight: 20 }}>
+              {`No ${noun} logged in the last ${SOURCE_WINDOW_HOURS} hours.${(openChip === 'insulin' ? !insulinChip.known : !carbsChip.known) ? ' So the amount on board is unknown.' : ''}`}
+            </Text>
+          ) : null}
+          {recent.kind === 'loading' || recent.kind === 'idle' ? (
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2 }}>Loading what you logged...</Text>
+          ) : null}
+          {recent.kind === 'unavailable' ? (
+            <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, lineHeight: 20 }}>
+              The list of what you logged could not be loaded right now. Nothing is shown rather than guessing.
+            </Text>
+          ) : null}
+          {rows.map((row, i) => (
+            <SourceRowView key={row.id} row={row} first={i === 0} />
+          ))}
+          <Pressable
+            onPress={() => openSheet({ mode: 'list' })}
+            accessibilityRole="button"
+            accessibilityLabel="See everything you logged"
+            style={{ minHeight: touch.min, justifyContent: 'center' }}
+          >
+            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.blue600 }}>See everything you logged</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function SourceRowView({ row, first }: { row: SourceRow; first: boolean }) {
+  const colors = useColors();
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${row.title}, ${row.detail}, ${formatTime12(new Date(row.timeIso))}, ${row.ago}${row.status ? `, ${row.status}` : ''}`}
+      style={{ gap: 2, paddingTop: first ? 0 : 10, borderTopWidth: first ? 0 : 1, borderTopColor: colors.divider }}
+    >
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+        <Text style={{ flexShrink: 1, fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: colors.ink }}>{row.title}</Text>
+        <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink }}>{formatTime12(new Date(row.timeIso))}</Text>
+      </View>
+      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }} numberOfLines={3}>
+        {row.detail}
+      </Text>
+      <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink2 }}>
+        {row.ago}
+        {row.status ? ` · ${row.status}` : ''}
+      </Text>
     </View>
   );
 }

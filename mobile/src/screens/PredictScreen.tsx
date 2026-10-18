@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
@@ -7,6 +7,7 @@ import { Card } from '../components/Card';
 import { Chip } from '../components/Chip';
 import { ForecastChartBlock } from '../components/ForecastExtras';
 import { GlucoseStatus } from '../components/GlucoseStatus';
+import { OnBoardChartCard } from '../components/OnBoardChart';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { TabScreenProps } from '../navigation/types';
 import { buildGlucoseChart } from '../services/glucoseChart';
@@ -17,8 +18,11 @@ import { spacing, useColors } from '../theme';
 
 const FORECAST_MARKS = [30, 60, 120] as const;
 
-export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
+export function PredictScreen({ navigation, route }: TabScreenProps<'Predict'>) {
   const colors = useColors();
+  // Another screen (the Safety alerts) can ask for the wear-off graph: `showGraph` is a new number each time.
+  const showGraph = route.params?.showGraph;
+  const [graphY, setGraphY] = useState<number | null>(null);
   const bottomPad = useTabScreenBottomPadding();
   const { view, refresh, refreshing } = useGlucose();
   const { view: forecastView } = useForecast();
@@ -58,7 +62,11 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
-      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 16 }}>
+      <PullToRefreshScrollView
+        onRefresh={refresh}
+        refreshing={refreshing}
+        scrollRequest={showGraph !== undefined && graphY !== null ? { y: Math.max(0, graphY - 12), id: showGraph } : undefined}
+        contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 16 }}>
         {view.kind === 'ok' && data && chart ? (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -83,6 +91,12 @@ export function PredictScreen({ navigation }: TabScreenProps<'Predict'>) {
                 <ForecastChartBlock data={data} height={chart.viewBoxHeight} />
               </View>
             </Card>
+
+            {mealAware ? (
+              <View onLayout={(e) => setGraphY(e.nativeEvent.layout.y)}>
+                <OnBoardChartCard data={data} />
+              </View>
+            ) : null}
 
             {!mealAware && chart.hasBand && data.rangesAreShadow ? (
               <Chip label="Estimated ranges: shadow mode, not validated" bg={colors.amber100} color={colors.amberDark} />

@@ -21,7 +21,19 @@ type Props = ScrollViewProps & {
   onRefresh: () => void;
   /** Keeps the spinner up while the request this pull started is in flight. */
   refreshing: boolean;
+  /** Scrolls to `y` once per new `id` (e.g. when another screen asks to be shown at a given spot). */
+  scrollRequest?: { y: number; id: number };
 };
+
+/** Performs a scroll request once per id. */
+function useScrollRequest(ref: React.RefObject<ScrollView | null>, request: Props['scrollRequest']) {
+  const handled = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || handled.current === request.id) return;
+    handled.current = request.id;
+    ref.current?.scrollTo({ y: request.y, animated: true });
+  }, [ref, request]);
+}
 
 const BADGE = 40;
 /** On a fast connection the request returns in a few ms; keep the spinner long enough to be seen. */
@@ -40,10 +52,13 @@ export function PullToRefreshScrollView(props: Props) {
   return Platform.OS === 'web' ? <WebPullToRefresh {...props} /> : <NativePullToRefresh {...props} />;
 }
 
-function NativePullToRefresh({ onRefresh, refreshing, ...rest }: Props) {
+function NativePullToRefresh({ onRefresh, refreshing, scrollRequest, ...rest }: Props) {
   const colors = useColors();
+  const ref = useRef<ScrollView>(null);
+  useScrollRequest(ref, scrollRequest);
   return (
     <ScrollView
+      ref={ref}
       {...rest}
       refreshControl={
         <RefreshControl
@@ -58,9 +73,10 @@ function NativePullToRefresh({ onRefresh, refreshing, ...rest }: Props) {
   );
 }
 
-function WebPullToRefresh({ onRefresh, refreshing, style, ...rest }: Props) {
+function WebPullToRefresh({ onRefresh, refreshing, scrollRequest, style, ...rest }: Props) {
   const colors = useColors();
   const scrollRef = useRef<ScrollView>(null);
+  useScrollRequest(scrollRef, scrollRequest);
   const latestOnRefresh = useRef(onRefresh);
   const [pull, setPull] = useState<PullState>(PULL_IDLE);
   const [holding, setHolding] = useState(false);

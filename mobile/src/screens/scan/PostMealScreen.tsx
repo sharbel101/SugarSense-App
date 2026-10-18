@@ -1,13 +1,14 @@
 import { useNavigation } from '@react-navigation/native';
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BackButton, PrimaryButton } from '../../components/Buttons';
+import { BackButton, PrimaryButton, SecondaryButton } from '../../components/Buttons';
 import { Card } from '../../components/Card';
 import { DoseConfirmCard } from '../../components/DoseConfirmCard';
 import { ForecastChartBlock } from '../../components/ForecastExtras';
 import { Icon } from '../../components/Icon';
 import { ScanScreenProps } from '../../navigation/types';
+import { cancelMealAndDose } from '../../services/cancelMealAndDose';
 import { useEvents } from '../../services/EventsProvider';
 import { useForecast } from '../../services/ForecastProvider';
 import { useGlucose } from '../../services/GlucoseProvider';
@@ -22,7 +23,15 @@ export function PostMealScreen({ navigation, route }: ScanScreenProps<'PostMeal'
   // Only claim the meal is in the forecast when the server's own event list says so.
   const mealInForecast =
     forecastView.kind === 'ok' && forecastView.data.mealAware.events.some((e) => e.type === 'meal' && e.id === mealRef.key);
-  const { records } = useEvents();
+  const { records, recent, refreshRecent, editMeal, editInsulin, discard } = useEvents();
+  const [asking, setAsking] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  // Bring the confirmation into view when it opens (it sits at the bottom of the page).
+  useEffect(() => {
+    if (asking) scrollRef.current?.scrollToEnd({ animated: true });
+  }, [asking]);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   // The meal may have been queued when the person confirmed it: read whether the server has it NOW.
   const mealRecord = records.find((r) => r.event.id === mealRef.key);
   const mealPending = mealRecord ? mealRecord.status !== 'saved' : mealRef.pending;
@@ -30,6 +39,37 @@ export function PostMealScreen({ navigation, route }: ScanScreenProps<'PostMeal'
   const insulinForMeal = records.find(
     (r) => r.event.kind === 'insulin' && r.event.mealId === mealRef.key && r.status !== 'failed',
   );
+
+  const hasDose = Boolean(insulinForMeal);
+
+  // Removes the dose first, then the meal (so the dose never acts alone), or drops what is still only on this device.
+  const cancelEntries = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    const out = await cancelMealAndDose(mealRef.key, {
+      records,
+      recentMeals: recent.kind === 'ok' ? recent.meals : [],
+      recentInsulin: recent.kind === 'ok' ? recent.insulin : [],
+      editMeal,
+      editInsulin,
+      discard,
+    });
+    setCancelling(false);
+    if (out.kind === 'done') {
+      refreshRecent();
+      navigation.getParent()?.navigate('Home');
+    } else if (out.kind === 'conflict') {
+      refreshRecent();
+      setCancelError('This entry changed - please check it again.');
+    } else {
+      setCancelError(
+        out.step === 'dose'
+          ? 'Could not remove the insulin right now. Nothing was changed - try again.'
+          : 'The insulin entry was removed, but the meal could not be removed right now. Try again.',
+      );
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
@@ -40,7 +80,7 @@ export function PostMealScreen({ navigation, route }: ScanScreenProps<'PostMeal'
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: 16 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: 16 }}>
         <View
           style={{
             flexDirection: 'row',
@@ -97,6 +137,29 @@ export function PostMealScreen({ navigation, route }: ScanScreenProps<'PostMeal'
           </Text>
         </Card>
 
+        {asking ? (
+          <Card>
+            <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+              {hasDose ? 'Remove this meal and its insulin?' : 'Remove this meal?'}
+            </Text>
+            <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20, marginTop: 6 }}>
+              {hasDose
+                ? 'They will no longer be used in your forecast. This only removes the entries from SugarSense; it does not change insulin you already took.'
+                : 'It will no longer be used in your forecast.'}
+            </Text>
+            {cancelError ? (
+              <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.red600, marginTop: 8 }}>
+                {cancelError}
+              </Text>
+            ) : null}
+            <View style={{ gap: 10, marginTop: 12 }}>
+              <PrimaryButton label={hasDose ? 'Remove both' : 'Remove meal'} onPress={() => void cancelEntries()} loading={cancelling} />
+              <SecondaryButton label="Keep them" onPress={() => { setAsking(false); setCancelError(null); }} />
+            </View>
+          </Card>
+        ) : (
+          <SecondaryButton label={hasDose ? 'Cancel meal and dose' : 'Cancel meal'} onPress={() => setAsking(true)} />
+        )}
       </ScrollView>
 
       <View

@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { goToScan } from '../navigation/navigationRef';
+import { currentTabName, goToScan } from '../navigation/navigationRef';
+import { beginCapture } from '../services/captureMeal';
 import type { InsulinKind } from '../services/events';
 import { useEvents } from '../services/EventsProvider';
 import { useForecast } from '../services/ForecastProvider';
@@ -155,6 +156,8 @@ function QuickAddSheet({ options, onClose }: { options: QuickAddOptions; onClose
                   onDone={onClose}
                   onBack={() => setMode('menu')}
                   onPhoto={() => {
+                    // Camera first, inside the tap; the Scan screen picks up the photo.
+                    beginCapture('camera', { returnTab: currentTabName(), returnOnCancel: true });
                     onClose();
                     goToScan();
                   }}
