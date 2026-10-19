@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
@@ -37,9 +38,19 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const { recent, refreshRecent, pendingCount } = useEvents();
   const { open: openQuickAdd } = useQuickAdd();
 
-  useEffect(() => {
+  // The list of what you logged is fetched every time Home is shown and then once a minute while it stays
+  // open (it used to be fetched only the first time, so new meals and doses did not appear).
+  useFocusEffect(
+    useCallback(() => {
+      refreshRecent();
+      const timer = setInterval(refreshRecent, 60_000);
+      return () => clearInterval(timer);
+    }, [refreshRecent]),
+  );
+  const refreshAll = useCallback(() => {
+    refresh();
     refreshRecent();
-  }, [refreshRecent]);
+  }, [refresh, refreshRecent]);
 
   const okData = view.kind === 'ok' ? view.data : null;
   const chart = useMemo(() => (okData ? buildHistoryChart(okData) : null), [okData]);
@@ -95,7 +106,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
       </View>
 
       <PullToRefreshScrollView
-        onRefresh={refresh}
+        onRefresh={refreshAll}
         refreshing={refreshing}
         contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}
       >

@@ -24,15 +24,12 @@ import {
   type EventRecord,
 } from './eventQueue';
 import { useForecast } from './ForecastProvider';
+import { recentAfterRefresh, recentWhileRefreshing, type RecentState } from './recentState';
 
 const STORAGE_KEY = 'sugarsense.eventQueue.v1';
 const RETRY_TICK_MS = 10_000;
 
-export type RecentState =
-  | { kind: 'idle' }
-  | { kind: 'loading' }
-  | { kind: 'ok'; meals: MealView[]; insulin: InsulinView[] }
-  | { kind: 'unavailable' };
+export type { RecentState } from './recentState';
 
 type EventsContextValue = {
   /** Entries the server has not confirmed (pending / failed) plus just-saved ones this session. */
@@ -101,15 +98,17 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY, serializeQueue(records)).catch(() => undefined);
   }, [records]);
 
+  // Keeps the list on screen while the new one loads, and keeps the last good list if the refresh fails.
   const refreshRecent = useCallback(() => {
-    setRecent({ kind: 'loading' });
-    void getRecent(apiContext, 48).then((r) => setRecent(r.kind === 'ok' ? r : { kind: 'unavailable' }));
+    setRecent((cur) => recentWhileRefreshing(cur));
+    void getRecent(apiContext, 48).then((r) => setRecent((cur) => recentAfterRefresh(cur, r.kind === 'ok' ? r : { kind: 'unavailable' })));
   }, []);
 
   const flush = useCallback(
     async (force: boolean) => {
       if (sendingRef.current) return;
       sendingRef.current = true;
+      let anySaved = false;
       try {
         let progressed = true;
         // A dose may wait for its meal: loop while something was sent, so the dose goes right after.
@@ -120,6 +119,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
             const report = await sendRecord(apiContext, recordsRef.current, rec, Date.now());
             if (report.skipped) continue;
             progressed = progressed || report.record.status === 'saved';
+            anySaved = anySaved || report.record.status === 'saved';
             recordsRef.current = recordsRef.current.map((r) => (r.event.id === rec.event.id ? report.record : r));
             setRecords(recordsRef.current);
             if (report.forecast) applyForecast(report.forecast);
@@ -128,8 +128,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       } finally {
         sendingRef.current = false;
       }
+      // What was just saved must show up in the lists (Home, Meals) without waiting for a reload.
+      if (anySaved) refreshRecent();
     },
-    [applyForecast],
+    [applyForecast, refreshRecent],
   );
 
   // Retry timer + on every return to the foreground.
@@ -138,13 +140,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       if (AppState.currentState === 'active') void flush(false);
     }, RETRY_TICK_MS);
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') void flush(true);
+      if (s === 'active') {
+        void flush(true);
+        refreshRecent();
+      }
     });
     return () => {
       clearInterval(tick);
       sub.remove();
     };
-  }, [flush]);
+  }, [flush, refreshRecent]);
 
   const addEvent = useCallback(
     (event: LoggedEvent) => {
@@ -184,19 +189,25 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
   const editMeal = useCallback(
     async (serverId: string, patch: MealPatch) => {
       const out = await patchMeal(apiContext, serverId, patch);
-      if (SERVER_HAS_IT.has(out.result) && out.forecast) applyForecast(out.forecast);
+      if (SERVER_HAS_IT.has(out.result)) {
+        if (out.forecast) applyForecast(out.forecast);
+        refreshRecent();
+      }
       return out;
     },
-    [applyForecast],
+    [applyForecast, refreshRecent],
   );
 
   const editInsulin = useCallback(
     async (serverId: string, patch: InsulinPatch) => {
       const out = await patchInsulin(apiContext, serverId, patch);
-      if (SERVER_HAS_IT.has(out.result) && out.forecast) applyForecast(out.forecast);
+      if (SERVER_HAS_IT.has(out.result)) {
+        if (out.forecast) applyForecast(out.forecast);
+        refreshRecent();
+      }
       return out;
     },
-    [applyForecast],
+    [applyForecast, refreshRecent],
   );
 
   const pendingCount = useMemo(() => records.filter((r) => r.status === 'pending').length, [records]);

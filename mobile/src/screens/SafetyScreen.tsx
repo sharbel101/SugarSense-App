@@ -35,7 +35,7 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
         <Avatar onPress={() => navigation.navigate('Profile')} />
       </View>
 
-      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}>
+      <PullToRefreshScrollView onRefresh={refresh} refreshing={refreshing} contentContainerStyle={{ flexGrow: 1, paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}>
         <PredictedRiskCard kind="low" onPress={showPredictions} />
         <PredictedRiskCard kind="high" onPress={showPredictions} />
         {/* Once alerts are on there is nothing left to set up here; test and turn off live in Profile. */}
