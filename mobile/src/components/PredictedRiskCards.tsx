@@ -105,8 +105,9 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
 
   const pulse = usePulse(tone === 'alert');
   const alertBg = kind === 'low' ? colors.red100 : colors.amber100;
-  const fg = tone === 'alert' ? (kind === 'low' ? colors.red600 : colors.amberDark) : colors.ink;
-  const sub = tone === 'alert' ? fg : colors.ink2;
+  // green when nothing is predicted, red (low) / orange (high) when it is, white when there is no forecast to judge by
+  const fg = tone === 'alert' ? (kind === 'low' ? colors.red600 : colors.amberDark) : tone === 'quiet' ? colors.greenDark : colors.ink;
+  const sub = tone === 'unknown' ? colors.ink2 : fg;
 
   return (
     <Pressable
@@ -121,9 +122,9 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
           padding: 20,
           justifyContent: 'space-between',
           overflow: 'hidden',
-          backgroundColor: tone === 'alert' ? alertBg : colors.surface,
+          backgroundColor: tone === 'alert' ? alertBg : tone === 'quiet' ? colors.green100 : colors.surface,
           borderWidth: 1,
-          borderColor: tone === 'alert' ? alertBg : colors.border,
+          borderColor: tone === 'alert' ? alertBg : tone === 'quiet' ? colors.green100 : colors.border,
         },
         pressed ? { opacity: 0.9 } : null,
       ]}
@@ -145,7 +146,7 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
             {name.toUpperCase()}
           </Text>
         </View>
-        <Icon name="chevronRight" size={18} color={tone === 'alert' ? fg : colors.ink3} />
+        <Icon name="chevronRight" size={18} color={tone === 'unknown' ? colors.ink3 : fg} />
       </View>
       <View style={{ gap: 6 }}>
         <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 26, lineHeight: 32, color: fg }}>
