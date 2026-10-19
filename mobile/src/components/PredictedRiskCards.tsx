@@ -106,8 +106,9 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
   const pulse = usePulse(tone === 'alert');
   const alertBg = kind === 'low' ? colors.red100 : colors.amber100;
   // green when nothing is predicted, red (low) / orange (high) when it is, white when there is no forecast to judge by
-  const fg = tone === 'alert' ? (kind === 'low' ? colors.red600 : colors.amberDark) : tone === 'quiet' ? colors.greenDark : colors.ink;
-  const sub = tone === 'unknown' ? colors.ink2 : fg;
+  const fg = tone === 'alert' ? (kind === 'low' ? colors.red600 : colors.amberDark) : colors.ink;
+  const sub = tone === 'alert' ? fg : colors.ink2;
+  const accent = tone === 'quiet' ? colors.green600 : fg;
 
   return (
     <Pressable
@@ -122,9 +123,10 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
           padding: 20,
           justifyContent: 'space-between',
           overflow: 'hidden',
-          backgroundColor: tone === 'alert' ? alertBg : tone === 'quiet' ? colors.green100 : colors.surface,
-          borderWidth: 1,
-          borderColor: tone === 'alert' ? alertBg : tone === 'quiet' ? colors.green100 : colors.border,
+          backgroundColor: tone === 'alert' ? alertBg : colors.surface,
+          // calm = white with a clear green edge; alert = tinted fill (red / orange) that pulses
+          borderWidth: tone === 'quiet' ? 2 : 1,
+          borderColor: tone === 'alert' ? alertBg : tone === 'quiet' ? colors.green600 : colors.border,
         },
         pressed ? { opacity: 0.9 } : null,
       ]}
@@ -142,11 +144,12 @@ export function PredictedRiskCard({ kind, onPress }: { kind: RiskKind; onPress: 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {tone === 'alert' ? <Icon name="alertTriangle" size={20} color={fg} /> : null}
-          <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 14, letterSpacing: 1, color: fg }}>
+          {tone === 'quiet' ? <Icon name="check" size={20} color={accent} /> : null}
+          <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 14, letterSpacing: 1, color: accent }}>
             {name.toUpperCase()}
           </Text>
         </View>
-        <Icon name="chevronRight" size={18} color={tone === 'unknown' ? colors.ink3 : fg} />
+        <Icon name="chevronRight" size={18} color={tone === 'alert' ? fg : colors.ink3} />
       </View>
       <View style={{ gap: 6 }}>
         <Text accessibilityLiveRegion="polite" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 26, lineHeight: 32, color: fg }}>
