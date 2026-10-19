@@ -3,6 +3,13 @@ import { carbCoverage, linkMealsToInsulin } from '../engine/coverage.js';
 import { carbSigmaG, priorBaselineSigma, type ForecastPoint } from '../engine/compose.js';
 import { resolveAbsorptionProfile } from '../engine/absorption.js';
 import {
+  SHORT_HISTORY_HORIZON_MIN,
+  SHORT_HISTORY_MODEL,
+  shortHistoryBaseline,
+  shortHistorySigma,
+  type ShortHistoryResult,
+} from '../engine/short-history.js';
+import {
   ABSORPTION_LAYER_VERSION,
   BASELINE_HORIZON_MIN,
   DEFAULT_ENGINE_PARAMS,
@@ -134,7 +141,7 @@ export class ForecastService {
   }
 
   async run(opts: RunOptions = {}): Promise<ForecastDisplay> {
-    const horizon = Math.min(MAX_HORIZON_MIN, Math.max(STEP_MIN, Math.floor((opts.horizonMin ?? MAX_HORIZON_MIN) / STEP_MIN) * STEP_MIN));
+    const requestedHorizon = Math.min(MAX_HORIZON_MIN, Math.max(STEP_MIN, Math.floor((opts.horizonMin ?? MAX_HORIZON_MIN) / STEP_MIN) * STEP_MIN));
     const g = await this.glucose.getGlucose();
     if (g.status === 'stale') return { status: 'stale', reason: g.reason, lastMeasuredAt: g.lastMeasuredAt };
     if (g.status === 'unavailable') return { status: 'unavailable', reason: g.reason };
@@ -143,10 +150,25 @@ export class ForecastService {
     const anchor = { measuredAt: g.measuredAt, glucoseMgdl: g.glucoseMgdl, ageMinutes: g.ageMinutes };
     // Without the glucose-only forecast no glucose line is drawn - but what the person logged is still
     // accounted for (insulin / carbs on board), so a logged meal or dose never seems to have vanished.
-    const baseline = g.predictions
+    let baseline = g.predictions
       .map((p) => ({ minutes: Math.round((toSec(p.time) - anchorSec) / 60), value: p.value }))
       .filter((p) => p.minutes >= STEP_MIN && p.minutes <= BASELINE_HORIZON_MIN && p.minutes % STEP_MIN === 0);
-    const baselineModel = g.modelVersion ?? 'unknown_baseline';
+    let baselineModel = g.modelVersion ?? 'unknown_baseline';
+    // The frozen model needs 12 readings over 50+ minutes. With a shorter or holed history, 4+ recent real readings are still enough
+    // for a short, wide, honestly labelled glucose-only line (out to 60 minutes). Never saved or learned from.
+    let shortHistory: Extract<ShortHistoryResult, { ok: true }> | null = null;
+    if (!g.forecastAvailable) {
+      const readings = new Map<number, number>(g.history.map((h) => [toSec(h.time), h.value]));
+      readings.set(anchorSec, g.glucoseMgdl);
+      const r = shortHistoryBaseline([...readings].map(([sec, mgdl]) => ({ sec, mgdl })));
+      if (r.ok) {
+        shortHistory = r;
+        baseline = r.baseline;
+        baselineModel = SHORT_HISTORY_MODEL;
+      }
+    }
+    const baselineAvailable = g.forecastAvailable || shortHistory !== null;
+    const horizon = shortHistory ? Math.min(requestedHorizon, SHORT_HISTORY_HORIZON_MIN) : requestedHorizon;
     const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
     const excludeMealIds = [...new Set(opts.excludeMealIds ?? [])].sort();
     const counterfactual = excludeMealIds.length > 0;
@@ -187,6 +209,13 @@ export class ForecastService {
       }
     } else {
       notes.push('Logged meals and insulin are not available right now, so this is the glucose-only forecast.');
+    }
+
+    if (shortHistory) {
+      sigmaFn = shortHistorySigma;
+      notes.push(
+        `Short history: only ${shortHistory.readingsUsed} recent glucose readings are available, so this line follows your current level and recent trend for up to 1 hour. It is wider and less certain than usual, and nothing is saved from it.`,
+      );
     }
 
     // Preview: the meal / dose being tried are added to what is logged and counted in full (never saved).
@@ -260,7 +289,7 @@ export class ForecastService {
       therapySettings: (atAnchor.icrStatus === 'available' && atAnchor.isfMgdlPerU !== null ? 'available' : 'unavailable') as 'available' | 'unavailable',
     };
 
-    if (!g.forecastAvailable) {
+    if (!baselineAvailable) {
       notes.push('Nothing is estimated without the glucose forecast, so no glucose line is drawn for your logged meals and insulin yet. They are saved and will be used as soon as it is back.');
       notes.push(...buildNotes({ layer, allDispositions, atAnchor, points: [], counterfactual, built, eventsLoaded: eventsLoaded || !this.db.available, baselineSigmaExtrapolated: true }));
       return {
@@ -282,7 +311,7 @@ export class ForecastService {
 
     // ---- save before the outcome is known ---------------------------------------------------------
     let saved = false;
-    if (eventsLoaded && userId && opts.persist !== false && !counterfactual) {
+    if (eventsLoaded && userId && opts.persist !== false && !counterfactual && !shortHistory) {
       try {
         const eligible = isLearningEligible(layer, allDispositions, built.meals, atAnchor, built.insulinHistory);
         const res = await this.store.persist({
@@ -344,7 +373,7 @@ export class ForecastService {
         ...(previewing ? { preview: { mealId: opts.preview?.meal?.mealId ?? null, insulinUnits: opts.preview?.insulin?.unitsAdministered ?? null } } : {}),
       },
       models: {
-        baseline: g.modelVersion,
+        baseline: shortHistory ? SHORT_HISTORY_MODEL : g.modelVersion,
         eventLayer: mainVersion,
         eventLayerEvidence: eventsLoaded && userId ? await this.personalization.layerEvidence(userId) : { status: 'none_yet', samples: 0 },
       },

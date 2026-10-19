@@ -115,10 +115,29 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
 
     it('reports an unavailable baseline instead of inventing a forecast', async () => {
       const rig = makeRig();
-      rig.fake.response = okGlucose(nowSec() - 120, 120, () => 120, { forecastAvailable: false, predictions: [], forecastUnavailableReason: 'gap' });
+      rig.fake.response = okGlucose(nowSec() - 120, 120, () => 120, { forecastAvailable: false, history: [], predictions: [], forecastUnavailableReason: 'gap' });
       const f = await rig.forecast.run();
       expect(f.status).toBe('baseline_unavailable');
       expect('points' in f).toBe(false);
+    });
+
+    it('with only 4 recent readings the model cannot run, but a short wide fallback line is drawn (60 min, not saved)', async () => {
+      const rig = makeRig();
+      const a = nowSec() - 120;
+      const short = (n: number) => Array.from({ length: n }, (_, i) => ({ time: iso(a - (n - 1 - i) * 300), value: 120 + (i % 2) }));
+      rig.fake.response = okGlucose(a, 120, () => 120, { forecastAvailable: false, predictions: [], history: short(4), forecastUnavailableReason: 'fewer than 12 suitable glucose readings' });
+      const before = await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId]);
+      const f = (await rig.forecast.run()) as unknown as { status: string; horizonMin: number; points: { minutes: number }[]; models: { baseline: string }; saved: boolean; notes: string[] };
+      expect(f.status).toBe('ok');
+      expect(f.models.baseline).toBe('trend_fallback_v1');
+      expect(f.horizonMin).toBe(60);
+      expect(Math.max(...f.points.map((p) => p.minutes))).toBe(60);
+      expect(f.saved).toBe(false);
+      expect(f.notes.join(' ')).toMatch(/Short history: only 4 recent glucose readings/);
+      expect(await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId])).toBe(before);
+      // 3 readings are not enough: still no line
+      rig.fake.response = okGlucose(a, 120, () => 120, { forecastAvailable: false, predictions: [], history: short(3), forecastUnavailableReason: 'x' });
+      expect((await rig.forecast.run()).status).toBe('baseline_unavailable');
     });
 
     it('with the glucose forecast unavailable, logged meals and insulin are still accounted for (on board), no line is drawn', async () => {
@@ -126,7 +145,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
       await setTestTherapy(rig);
       await rig.api.addMeal({ clientId: 'gap-meal-0001', eatenAt: iso(nowSec() - 600), carbsG: 60 });
       await rig.api.addInsulin({ clientId: 'gap-dose-0001', administeredAt: iso(nowSec() - 600), kind: 'bolus', confirmation: 'confirmed', unitsAdministered: 6, source: 'manual' });
-      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, predictions: [], forecastUnavailableReason: 'fewer than 12 suitable glucose readings to run the forecast' });
+      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, history: [], predictions: [], forecastUnavailableReason: 'fewer than 12 suitable glucose readings to run the forecast' });
       const f = (await rig.forecast.run()) as unknown as {
         status: string; reason: string; points?: unknown; notes: string[];
         mealAware?: { availability: { mealsUsed: number; insulinOnBoardUnits: number | null; carbsOnBoardGrams: number | null; insulin: string }; events: { type: string; role: string }[] };
@@ -146,7 +165,7 @@ describe.skipIf(!hasTestDb)('meal-aware forecasting on PostgreSQL', () => {
     it('the note that comes back with a photo meal never claims a forecast that does not exist', async () => {
       const rig = makeRig({ glucose: 130, baseline: () => 130 });
       await setTestTherapy(rig);
-      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, predictions: [], forecastUnavailableReason: 'gap' });
+      rig.fake.response = okGlucose(nowSec() - 120, 180, () => 180, { forecastAvailable: false, history: [], predictions: [], forecastUnavailableReason: 'gap' });
       const res = await mealService(rig, [{ kind: 'raw', rawText: detectedRaw }]).analyzeMeal(photo);
       expect(res.status).toBe('ok');
       expect(res.forecast?.status).toBe('baseline_unavailable');

@@ -74,6 +74,7 @@ adjusted(h) = baseline(h) + m_csf * CSF * C * [F(age+h) - F(age)]  -  m_isf * IS
 | Uncertain meal/dose timing | Timing term widens the band |
 | Database down / not configured | Glucose-only forecast, `saved: false`, fixed explanatory note; write routes answer 503 with a fixed message |
 | Glucose stale/unavailable | Passed through; no forecast is produced |
+| Short history (model needs 12 readings over 50+ min, no gap over 20) | With 4+ real readings in the last 25 min and no gap over 10 min, a fallback line (`models.baseline = trend_fallback_v1`: latest value plus the recent slope times the model's measured trend response, `src/engine/short-history.ts`) is drawn out to 60 min only, with a wider band and a "Short history" note. Never saved, never learned from, never scored. Backtest on 8,648 stored readings (40 days): MAE 12.3 / 19.8 / 25.7 / 30.3 mg/dL at 15 / 30 / 45 / 60 min, equal to persistence within 0.3 and about 2 mg/dL worse than the model at 45-60 min; 3 to 6 readings gave the same accuracy. It adds no skill over "stay where you are"; it exists so the line and the logged meals and doses are not blank |
 | Forecast model unavailable | `baseline_unavailable`; nothing is extrapolated. The answer still carries `mealAware` (events, coverage, on-board estimates) so the screen can show what was logged, and the note says plainly that no forecast line exists |
 | Glucose stale | `stale` with a fixed message; no number and no forecast |
 
