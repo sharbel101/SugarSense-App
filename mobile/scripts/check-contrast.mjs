@@ -62,6 +62,7 @@ const PAIRS = [
   ['chevron / icon on surface', 'ink4', 'surface', GRAPHIC],
   ['chart actual line on surface', 'blue700', 'surface', GRAPHIC],
   ['chart forecast line on surface', 'blue500', 'surface', GRAPHIC],
+  ['white check on green disc (calm Safety square)', 'onBlue', 'green600', GRAPHIC],
   ['chart insulin-on-board line on surface', 'purple600', 'surface', GRAPHIC],
   ['chart carbs-on-board line on surface', 'amber600', 'surface', GRAPHIC],
   ['progress-bar fill on track (meal-analysis loading bar)', 'blue600', 'divider', GRAPHIC],
