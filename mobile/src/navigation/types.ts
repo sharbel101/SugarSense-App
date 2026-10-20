@@ -12,9 +12,9 @@ export type ScanStackParamList = {
 };
 
 export type TabParamList = {
-  Home: undefined;
   /** `toTop`: any new number scrolls the page back to its top (e.g. when a Safety card opens it). */
-  Predict: { toTop?: number } | undefined;
+  Home: { toTop?: number } | undefined;
+  Wearable: undefined;
   Scan: NavigatorScreenParams<ScanStackParamList>;
   Safety: undefined;
   Insights: undefined;
@@ -25,6 +25,7 @@ export type RootStackParamList = {
   Profile: undefined;
   InsulinSettings: undefined;
   MealHistory: undefined;
+  InsulinHistory: undefined;
 };
 
 declare global {

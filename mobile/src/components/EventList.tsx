@@ -348,7 +348,7 @@ export function EditMeal({ view, onClose, showTitle = true }: { view: MealView; 
   );
 }
 
-function EditInsulin({ view, onClose }: { view: InsulinView; onClose: () => void }) {
+export function EditInsulin({ view, onClose }: { view: InsulinView; onClose: () => void }) {
   const colors = useColors();
   const { editInsulin } = useEvents();
   const { message, setMessage, busy, setBusy, handle } = useEditOutcome();

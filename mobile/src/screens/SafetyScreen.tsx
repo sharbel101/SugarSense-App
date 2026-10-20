@@ -15,8 +15,8 @@ export function SafetyScreen({ navigation }: TabScreenProps<'Safety'>) {
   const bottomPad = useTabScreenBottomPadding();
   const { refresh, refreshing } = useGlucose();
   const { enabled, permission } = useRiskAlerts();
-  // Opens the Predict page at its top (a new number each tap, so it also resets a page scrolled down earlier).
-  const showPredictions = () => navigation.navigate('Predict', { toTop: Date.now() });
+  // Opens the Home page (the graph) at its top (a new number each tap, so it also resets a page scrolled down earlier).
+  const showPredictions = () => navigation.navigate('Home', { toTop: Date.now() });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }} edges={['top']}>

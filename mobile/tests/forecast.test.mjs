@@ -243,3 +243,15 @@ test('savedMessage never claims an update without a returned forecast', () => {
   assert.equal(savedMessage(true), 'Saved. Forecast updated.');
   assert.equal(savedMessage(false), 'Saved. The forecast will update on the next reading.');
 });
+
+test('per-point insulin / carbs on board: parsed when sent, null when an older server omits them, garbage rejects the answer', () => {
+  const withIob = okBody();
+  withIob.points = withIob.points.map((p) => ({ ...p, insulinOnBoardUnits: 2.5, carbsOnBoardGrams: 12 }));
+  const parsed = parseForecastResponse(withIob);
+  assert.equal(parsed.points[0].insulinOnBoardUnits, 2.5);
+  assert.equal(parsed.points[0].carbsOnBoardGrams, 12);
+  assert.equal(parseForecastResponse(okBody()).points[0].insulinOnBoardUnits, null);
+  const garbage = okBody();
+  garbage.points[3].insulinOnBoardUnits = 'lots';
+  assert.equal(parseForecastResponse(garbage), null);
+});

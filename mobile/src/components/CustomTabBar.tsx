@@ -9,7 +9,7 @@ import { Icon, IconName } from './Icon';
 
 const TAB_META: Record<string, { label: string; icon: IconName }> = {
   Home: { label: 'Home', icon: 'home' },
-  Predict: { label: 'Predict', icon: 'trending' },
+  Wearable: { label: 'Wearable', icon: 'watch' },
   Scan: { label: 'Scan', icon: 'camera' },
   Safety: { label: 'Safety', icon: 'shield' },
   Insights: { label: 'Insights', icon: 'sparkle' },

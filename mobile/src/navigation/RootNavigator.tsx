@@ -7,7 +7,8 @@ import { QuickAddFab } from '../components/QuickAdd';
 import { CustomTabBar } from '../components/CustomTabBar';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
-import { PredictScreen } from '../screens/PredictScreen';
+import { WearableScreen } from '../screens/WearableScreen';
+import { InsulinHistoryScreen } from '../screens/InsulinHistoryScreen';
 import { InsulinSettingsScreen } from '../screens/InsulinSettingsScreen';
 import { MealHistoryScreen } from '../screens/MealHistoryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -19,7 +20,7 @@ import { RootStackParamList, TabParamList } from './types';
 
 /** Screens where the global "+" is hidden: the scan flow is deliberately immersive, Profile is a modal. */
 // Home has its own Add meal / Log insulin buttons, so the floating + is hidden there.
-const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory']);
+const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory', 'InsulinHistory']);
 
 const Tab = createBottomTabNavigator<TabParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -47,7 +48,7 @@ function Tabs() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Predict" component={PredictScreen} />
+      <Tab.Screen name="Wearable" component={WearableScreen} />
       <Tab.Screen name="Scan" component={ScanNavigator} />
       <Tab.Screen name="Safety" component={SafetyScreen} />
       <Tab.Screen name="Insights" component={InsightsScreen} />
@@ -90,6 +91,7 @@ export function RootNavigator() {
         />
         <RootStack.Screen name="InsulinSettings" component={InsulinSettingsScreen} />
         <RootStack.Screen name="MealHistory" component={MealHistoryScreen} />
+        <RootStack.Screen name="InsulinHistory" component={InsulinHistoryScreen} />
       </RootStack.Navigator>
     </NavigationContainer>
     <QuickAddFab hidden={FAB_HIDDEN_ROUTES.has(leafRoute)} />

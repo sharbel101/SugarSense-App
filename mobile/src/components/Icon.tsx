@@ -34,7 +34,11 @@ export type IconName =
   | 'refresh'
   | 'trendUp'
   | 'trendDown'
-  | 'wifi';
+  | 'wifi'
+  | 'watch'
+  | 'moon'
+  | 'steps'
+  | 'oxygen';
 
 type Props = {
   name: IconName;
@@ -291,6 +295,37 @@ export function Icon({ name, size = 24, color: colorProp, strokeWidth = 1.8 }: P
           <Path d="M4 16a11 11 0 0 1 16 0" {...common} />
           <Path d="M7.5 19a6.5 6.5 0 0 1 9 0" {...common} />
           <Circle cx={12} cy={21} r={1} fill={color} stroke="none" />
+        </Svg>
+      );
+    case 'watch':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={7} y={6} width={10} height={12} rx={3} {...common} />
+          <Path d="M9 6l.7-3h4.6l.7 3M9 18l.7 3h4.6l.7-3" {...common} />
+          <Polyline points="12 9.5 12 12 13.8 13" {...common} />
+        </Svg>
+      );
+    case 'moon':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" {...common} />
+        </Svg>
+      );
+    case 'steps':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M8 4c2 0 3 1.8 3 4.2 0 2-1 3.3-3 3.3S5 10 5 8 6.2 4 8 4z" {...common} />
+          <Path d="M5.5 14h5v1.4a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V14z" {...common} />
+          <Path d="M16 8c2 0 3 1.8 3 4.2 0 2-1 3.3-3 3.3s-3-1.5-3-3.5S14.2 8 16 8z" {...common} />
+          <Path d="M13.5 18h5v1.4a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V18z" {...common} />
+        </Svg>
+      );
+    case 'oxygen':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Circle cx={12} cy={12} r={8} {...common} />
+          <Path d="M9.5 10a1.8 1.8 0 1 1 0 4 1.8 1.8 0 0 1 0-4z" {...common} />
+          <Path d="M14 15h3l-3-2.5c.8-1.4 2.2-1.8 3-1" {...common} />
         </Svg>
       );
     default:

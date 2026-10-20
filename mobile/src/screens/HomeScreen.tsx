@@ -4,7 +4,8 @@ import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
 import { Card } from '../components/Card';
-import { GlucoseChart } from '../components/GlucoseChart';
+import { FallbackForecast } from '../components/FallbackForecast';
+import { ForecastChartBlock } from '../components/ForecastExtras';
 import { TrendArrow } from '../components/TrendArrow';
 import { GlucoseStatus } from '../components/GlucoseStatus';
 import { Icon, IconName } from '../components/Icon';
@@ -13,8 +14,8 @@ import { useQuickAdd, useTabScreenBottomPadding } from '../components/QuickAdd';
 import { TabScreenProps } from '../navigation/types';
 import { useEvents } from '../services/EventsProvider';
 import { formatEventTime } from '../services/events';
-import { buildHistoryChart } from '../services/glucoseChart';
-import { summariseRisk } from '../services/glucoseRisk';
+import { buildGlucoseChart } from '../services/glucoseChart';
+import { useForecast } from '../services/ForecastProvider';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
 import { insulinRows, mealRows, type EntryRow } from '../services/homeEntries';
@@ -30,13 +31,16 @@ function greeting() {
 
 const ROWS_SHOWN = 4;
 
-/** Home = what is happening right now: glucose, alerts, quick actions, today's meals, recent activity. */
-export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
+/** Home: current glucose with the predicted graph and on-board amounts, quick actions, then recent carbs and insulin. */
+export function HomeScreen({ navigation, route }: TabScreenProps<'Home'>) {
   const colors = useColors();
   const bottomPad = useTabScreenBottomPadding();
   const { view, refresh, refreshing } = useGlucose();
   const { recent, refreshRecent } = useEvents();
   const { open: openQuickAdd } = useQuickAdd();
+  const { view: forecastView } = useForecast();
+  // Another screen (the Safety cards) can ask for the top of this page: `toTop` is a new number each time.
+  const toTop = route.params?.toTop;
 
   // The list of what you logged is fetched every time Home is shown and then once a minute while it stays
   // open (it used to be fetched only the first time, so new meals and doses did not appear).
@@ -53,8 +57,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   }, [refresh, refreshRecent]);
 
   const okData = view.kind === 'ok' ? view.data : null;
-  const chart = useMemo(() => (okData ? buildHistoryChart(okData) : null), [okData]);
-  const risk = useMemo(() => (okData ? summariseRisk(okData) : null), [okData]);
+  const chart = useMemo(() => (okData ? buildGlucoseChart(okData) : null), [okData]);
   const trend = okData ? trendDisplay(okData.trendMgdlPerMin) : null;
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -97,9 +100,10 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
       <PullToRefreshScrollView
         onRefresh={refreshAll}
         refreshing={refreshing}
+        scrollRequest={toTop !== undefined ? { y: 0, id: toTop } : undefined}
         contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}
       >
-        {/* 1. Current glucose */}
+        {/* 1-2. Current glucose, the predicted glucose graph, and insulin / carbs on board right below it */}
         <Card elevated>
           {view.kind === 'ok' && okData && chart ? (
             <>
@@ -117,9 +121,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                   </View>
                 ) : null}
               </View>
-              {trend ? (
-                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, marginTop: 2 }}>{trend.text}</Text>
-              ) : null}
+              {trend ? <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink, marginTop: 2 }}>{trend.text}</Text> : null}
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, marginTop: 2 }}>
                 Updated {formatAge(view.ageMinutes)} · measured {formatClock(okData.measuredAt)}
               </Text>
@@ -128,41 +130,18 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                   Couldn&apos;t refresh - showing the previous reading.
                 </Text>
               ) : null}
-              <View style={{ marginTop: 12 }}>
-                <GlucoseChart
-                  viewBoxWidth={chart.viewBoxWidth}
-                  viewBoxHeight={chart.viewBoxHeight}
-                  actual={chart.actual}
-                  predicted={[]}
-                  nowX={chart.nowX}
-                  gridLinesY={chart.gridLinesY}
-                  xTicks={chart.xTicks}
-                  yTicks={chart.yTicks}
-                  height={150}
-                  forecastPoints={chart.scrubPoints}
-                  scrubKind="history"
-                  accessibilityLabel={`Glucose over the last hour. Latest reading ${Math.round(okData.glucoseMgdl)} milligrams per decilitre. Press and drag to read earlier values.`}
-                />
-                <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.ink3, marginTop: 4 }}>Press and drag on the graph to see earlier readings.</Text>
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 14 }}>
+                Predicted range · next 3 hours
+              </Text>
+              <View style={{ marginTop: 6 }}>
+                <ForecastChartBlock data={okData} height={chart.viewBoxHeight} />
               </View>
             </>
           ) : view.kind === 'ok' ? null : (
             <GlucoseStatus view={view} onRetry={refresh} retrying={refreshing} />
           )}
         </Card>
-
-        {/* 2. Important alerts - only when there is one */}
-        {risk?.alerting ? (
-          <Card onPress={() => navigation.navigate('Safety')} accessibilityLabel="Open Safety">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <IconChip bg={colors.amber100}>
-                <Icon name="alertTriangle" size={19} color={colors.amber600} />
-              </IconChip>
-              <Text style={{ flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink, lineHeight: 21 }}>{risk.lines.join(' ')}</Text>
-              <Icon name="chevronRight" size={18} color={colors.ink4} />
-            </View>
-          </Card>
-        ) : null}
+        {okData && chart && forecastView.kind !== 'ok' ? <FallbackForecast data={okData} hasBand={chart.hasBand} /> : null}
 
         {/* 5 (moved up for reach). Quick actions */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -170,6 +149,9 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           <ActionButton label="Log insulin" icon="droplet" onPress={() => openQuickAdd({ mode: 'insulin' })} />
         </View>
 
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 18, color: colors.ink, marginTop: 4 }}>
+          Recent activity
+        </Text>
         <EntriesCard
           title="Recent carbs"
           total={todaysCarbs !== null ? Math.round(todaysCarbs) + ' g today' : null}
@@ -185,8 +167,8 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           rows={doses}
           empty="No insulin logged today."
           loading={recent.kind === 'loading' || recent.kind === 'idle'}
-          onPress={() => openQuickAdd({ mode: 'list' })}
-          label="Open what you logged"
+          onPress={() => navigation.navigate('InsulinHistory')}
+          label="Open insulin history"
         />
       </PullToRefreshScrollView>
     </SafeAreaView>
@@ -219,23 +201,6 @@ function ActionButton({ label, icon, onPress, primary }: { label: string; icon: 
       <Icon name={icon} size={20} color={primary ? colors.onBlue : colors.blue600} />
       <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: primary ? colors.onBlue : colors.ink }}>{label}</Text>
     </Pressable>
-  );
-}
-
-function IconChip({ bg, children }: { bg: string; children: React.ReactNode }) {
-  return (
-    <View
-      style={{
-        width: 38,
-        height: 38,
-        borderRadius: radius.chip,
-        backgroundColor: bg,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {children}
-    </View>
   );
 }
 
