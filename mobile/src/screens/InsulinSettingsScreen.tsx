@@ -31,6 +31,11 @@ const INSULIN: { value: 'rapid' | 'ultra_rapid'; label: string }[] = [
   { value: 'ultra_rapid', label: 'Ultra-rapid' },
 ];
 
+const YES_NO: { value: 'yes' | 'no'; label: string }[] = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+];
+
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '');
 
 /**
@@ -50,6 +55,9 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
   const [source, setSource] = useState<TherapySource | null>(null);
   const [insulinType, setInsulinType] = useState<'rapid' | 'ultra_rapid' | null>(null);
   const [note, setNote] = useState('');
+  // "Do you have insulin resistance in the morning?" null = not answered (nothing is sent).
+  const [morning, setMorning] = useState<boolean | null>(null);
+  const [morningPercent, setMorningPercent] = useState('');
   const [errors, setErrors] = useState<TherapyFormErrors | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -96,6 +104,8 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
         );
         setSource(cur.value.source);
         setInsulinType(cur.value.insulinType);
+        setMorning(cur.value.morningInsulinResistance);
+        setMorningPercent(cur.value.morningResistancePercent === null ? '' : String(cur.value.morningResistancePercent));
       }
     },
     [],
@@ -117,7 +127,7 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
 
   const save = async () => {
     if (saving) return;
-    const result = validateTherapyForm({ rows, source, insulinType, note });
+    const result = validateTherapyForm({ rows, source, insulinType, note, morning: { answer: morning, percent: morningPercent } });
     if (!result.ok) {
       setErrors(result.errors);
       setMessage(null);
@@ -183,6 +193,39 @@ export function InsulinSettingsScreen({ navigation }: NativeStackScreenProps<Roo
                   </Text>
                   <FormField label="1 unit covers" required value={rows[0].icr} onChangeText={(t) => setRow(0, { icr: t })} unit="g" keyboardType="decimal-pad" placeholder="e.g. 10" error={errors?.rows[0]?.icr} />
                   <FormField label="Correction factor: 1 unit lowers glucose by (optional)" value={rows[0].isf} onChangeText={(t) => setRow(0, { isf: t })} unit="mg/dL" keyboardType="decimal-pad" error={errors?.rows[0]?.isf} />
+                </View>
+              </Card>
+
+              <Card>
+                <View style={{ gap: 12 }}>
+                  <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+                    Do you have insulin resistance in the morning?
+                  </Text>
+                  <ChoiceChips
+                    options={YES_NO}
+                    value={morning === null ? ('' as 'yes') : morning ? 'yes' : 'no'}
+                    onChange={(v) => setMorning(v === 'yes')}
+                  />
+                  {current?.morningResistanceExplanation ? (
+                    <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>{current.morningResistanceExplanation}</Text>
+                  ) : null}
+                  {morning === true ? (
+                    <>
+                      <FormField
+                        label="About how much more insulin does your first dose of the day need? (%) - optional"
+                        value={morningPercent}
+                        onChangeText={setMorningPercent}
+                        unit="%"
+                        keyboardType="decimal-pad"
+                        placeholder={`default ${current?.morningResistanceDefaultPercent ?? 25}%`}
+                        error={errors?.morningPercent}
+                      />
+                      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>
+                        An estimate. It changes the forecast only; it never changes or suggests a dose.
+                        {current?.morningResistanceUsedPercent != null ? ` The forecast is using ${current.morningResistanceUsedPercent}% now.` : ''}
+                      </Text>
+                    </>
+                  ) : null}
                 </View>
               </Card>
 

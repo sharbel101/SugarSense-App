@@ -21,9 +21,21 @@ export interface TherapySettingsView {
   insulinPeakMin: number | null;
   insulinDurationMin: number | null;
   note: string | null;
+  /** The person's answer to "Do you have insulin resistance in the morning?"; null = no answer / an older server. */
+  morningInsulinResistance: boolean | null;
+  /** The percent the person entered; null = none entered (the default is used). */
+  morningResistancePercent: number | null;
+  /** The percent the forecast actually uses right now; null when the server did not send it. */
+  morningResistanceUsedPercent: number | null;
+  morningResistanceDefaultPercent: number;
+  /** Plain-language helper text from the server. */
+  morningResistanceExplanation: string;
   whenMissing: string;
   disclaimer: string;
 }
+
+export const MORNING_RESISTANCE_MAX_PERCENT = 50;
+export const MORNING_RESISTANCE_DEFAULT_PERCENT = 25;
 
 export const THERAPY_LIMITS = {
   icrMin: 1,
@@ -69,6 +81,11 @@ export function parseTherapyView(body: unknown): TherapySettingsView | null {
     insulinPeakMin: num(body.insulinPeakMin),
     insulinDurationMin: num(body.insulinDurationMin),
     note: str(body.note),
+    morningInsulinResistance: typeof body.morningInsulinResistance === 'boolean' ? body.morningInsulinResistance : null,
+    morningResistancePercent: num(body.morningResistancePercent),
+    morningResistanceUsedPercent: num(body.morningResistanceUsedPercent),
+    morningResistanceDefaultPercent: num(body.morningResistanceDefaultPercent) ?? MORNING_RESISTANCE_DEFAULT_PERCENT,
+    morningResistanceExplanation: str(body.morningResistanceExplanation) ?? '',
     whenMissing: str(body.whenMissing) ?? '',
     disclaimer: str(body.disclaimer) ?? '',
   };
@@ -135,6 +152,10 @@ export interface TherapyPutBody {
   source: TherapySource;
   effectiveFrom?: string;
   note?: string;
+  /** Omit to keep the previous answer. `false` also clears the percent. */
+  morningInsulinResistance?: boolean;
+  /** 0-50, one decimal; only with `morningInsulinResistance: true`. Omit to use the default. */
+  morningResistancePercent?: number;
   /** IANA zone the time-of-day segments are read in, e.g. "Asia/Beirut". Added from the device on every save. */
   timezone?: string;
 }
@@ -171,11 +192,14 @@ export type TherapyFormInput = {
   source: TherapySource | null;
   insulinType: 'rapid' | 'ultra_rapid' | null;
   note: string;
+  /** `answer` null = the person has not answered (nothing is sent). `percent` is text, '' = not entered. */
+  morning?: { answer: boolean | null; percent: string };
 };
 export type TherapyFormErrors = {
   rows: { startTime?: string; icr?: string; isf?: string }[];
   source?: string;
   note?: string;
+  morningPercent?: string;
   general?: string;
 };
 
@@ -264,6 +288,18 @@ export function validateTherapyForm(
     errors.note = 'Keep the note under 500 characters.';
     mark();
   }
+  // Morning insulin resistance: the percent is optional (empty = the server's default); false sends no percent.
+  const morning = input.morning;
+  let morningPercent: number | null = null;
+  if (morning && morning.answer === true && morning.percent.trim() !== '') {
+    const p = decimal(morning.percent);
+    if (p === null || p < 0 || p > MORNING_RESISTANCE_MAX_PERCENT || Math.abs(p * 10 - Math.round(p * 10)) > 1e-6) {
+      errors.morningPercent = `Enter 0 to ${MORNING_RESISTANCE_MAX_PERCENT}, with at most one decimal, or leave it empty.`;
+      mark();
+    } else {
+      morningPercent = p;
+    }
+  }
   if (bad || input.source === null) return { ok: false, errors };
 
   const body: TherapyPutBody = {
@@ -274,6 +310,8 @@ export function validateTherapyForm(
     ...(input.insulinType ? { insulinType: input.insulinType } : null),
     source: input.source,
     ...(input.note.trim() ? { note: input.note.trim() } : null),
+    ...(morning && morning.answer !== null ? { morningInsulinResistance: morning.answer } : null),
+    ...(morning && morning.answer === true && morningPercent !== null ? { morningResistancePercent: morningPercent } : null),
   };
   return { ok: true, body };
 }

@@ -9,7 +9,7 @@ import {
   postInsulin,
   postMeal,
 } from '../src/api/eventsApi.ts';
-import { getTherapySettings, putTherapySettings, validateTherapyForm } from '../src/api/therapyApi.ts';
+import { getTherapySettings, parseTherapyView, putTherapySettings, validateTherapyForm } from '../src/api/therapyApi.ts';
 import { buildInsulinEvent, buildMealEvent, buildNoInsulinEvent, isValidClientId } from '../src/services/events.ts';
 import {
   addRecord,
@@ -277,6 +277,37 @@ test('therapy API: not_set view parses; PUT 400 surfaces the server text; 404 = 
   const rejected = await putTherapySettings({ baseUrl: '', ...stub(400, { message: ['icrSegments.0.gramsPerUnit too big'] }) }, { icrSegments: [{ startMinute: 0, gramsPerUnit: 10 }], source: 'user_entered' });
   assert.equal(rejected.kind, 'invalid');
   assert.match(rejected.reason, /too big/);
+});
+
+test('morning insulin resistance: answer is sent only when given, percent only with yes (0-50, one decimal), false sends no percent', () => {
+  const base = { rows: [{ startTime: '00:00', icr: '10', isf: '40' }], source: 'user_entered', insulinType: null, note: '' };
+  const body = (morning) => validateTherapyForm({ ...base, morning }).body;
+  assert.equal('morningInsulinResistance' in body(undefined), false, 'no morning input: nothing sent (keeps the previous answer)');
+  assert.equal('morningInsulinResistance' in body({ answer: null, percent: '30' }), false, 'unanswered: nothing sent');
+  assert.deepEqual(
+    (({ morningInsulinResistance, morningResistancePercent }) => ({ morningInsulinResistance, morningResistancePercent }))(body({ answer: true, percent: '30.5' })),
+    { morningInsulinResistance: true, morningResistancePercent: 30.5 },
+  );
+  const yesEmpty = body({ answer: true, percent: '' });
+  assert.equal(yesEmpty.morningInsulinResistance, true);
+  assert.equal('morningResistancePercent' in yesEmpty, false, 'empty percent: the server default is used');
+  const no = body({ answer: false, percent: '40' });
+  assert.equal(no.morningInsulinResistance, false);
+  assert.equal('morningResistancePercent' in no, false, 'false sends no percent (the server clears it)');
+  for (const bad of ['51', '-1', '12.34', 'abc']) {
+    const r = validateTherapyForm({ ...base, morning: { answer: true, percent: bad } });
+    assert.equal(r.ok, false, bad);
+    assert.ok(r.errors.morningPercent, bad);
+  }
+  assert.equal(validateTherapyForm({ ...base, morning: { answer: true, percent: '50' } }).ok, true);
+  assert.equal(validateTherapyForm({ ...base, morning: { answer: true, percent: '0' } }).ok, true);
+});
+
+test('therapy view reads the morning fields; an older server without them gives null / the default', () => {
+  const view = parseTherapyView({ status: 'set', icrSegments: [], isfSegments: [], morningInsulinResistance: true, morningResistancePercent: 30, morningResistanceUsedPercent: 30, morningResistanceDefaultPercent: 25, morningResistanceExplanation: 'text' });
+  assert.deepEqual([view.morningInsulinResistance, view.morningResistancePercent, view.morningResistanceUsedPercent, view.morningResistanceDefaultPercent, view.morningResistanceExplanation], [true, 30, 30, 25, 'text']);
+  const old = parseTherapyView({ status: 'not_set', icrSegments: [], isfSegments: [] });
+  assert.deepEqual([old.morningInsulinResistance, old.morningResistancePercent, old.morningResistanceDefaultPercent], [null, null, 25]);
 });
 
 test('therapy save sends the device time zone so time-of-day ratios are read in the right zone', async () => {
