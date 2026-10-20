@@ -45,10 +45,20 @@ export const therapySettingsSchema = z
     /** When the setting starts to apply. Default: now. Not more than 24 h in the future. */
     effectiveFrom: z.iso.datetime({ offset: true }).optional(),
     note: z.string().trim().max(500).optional(),
+    /**
+     * "Do you have insulin resistance in the morning?" Yes = the FIRST rapid-acting dose of each day (whenever the person wakes) needs more insulin for
+     * the same effect. Used by the forecast only; never changes a dose, the ICR or the ISF. Omitted = keep the previous answer.
+     */
+    morningInsulinResistance: z.boolean().optional(),
+    /** Percent EXTRA insulin that dose needs (0-50). Optional: omitted with "yes" = the default (25). Only valid together with "yes". */
+    morningResistancePercent: z.number().min(0).max(50).refine((v) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-6, 'at most 1 decimal').optional(),
     /** IANA zone the time-of-day segments are read in, e.g. "Asia/Beirut". The app should send the phone's zone. */
     timezone: z.string().min(1).max(64).refine(isValidTimeZone, 'not a valid IANA time zone').optional(),
   })
   .strict()
+  .refine((v) => v.morningResistancePercent === undefined || v.morningInsulinResistance !== false, {
+    message: 'morningResistancePercent needs morningInsulinResistance: true',
+  })
   .refine((v) => v.insulinPeakMin === undefined || v.insulinDurationMin === undefined || v.insulinPeakMin < v.insulinDurationMin / 2, {
     message: 'insulinPeakMin must be less than half of insulinDurationMin',
   });

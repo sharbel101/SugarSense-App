@@ -217,3 +217,23 @@ table, which is an approximation (the layer was not better than the glucose-only
 the 60-120 min baseline error is extrapolated from 5-60 min measurements; exercise and sleep are not used; fat/protein
 amplitudes are not learned; photo-time timing uncertainty (10 min) and the dose-uncertainty factor (50%) are engineering
 defaults; one user, no authentication; meal edits change totals, not individual items.
+
+
+## Morning insulin resistance (added 2026-10-20)
+
+Setting (per therapy version, `PUT /therapy/settings`): `morningInsulinResistance` (boolean; omitted = keep the previous answer) and optional
+`morningResistancePercent` (0 to 50, one decimal; only valid together with `true`). `GET /therapy/settings` also returns
+`morningResistanceUsedPercent` (what the forecast uses: the person's percent, else 25 while the answer is yes, else null), `morningResistanceDefaultPercent` (25)
+and a fixed `morningResistanceExplanation`. Switching the answer to `false` drops the percent. Every change is a new immutable version (migration `0009`).
+
+Effect: the person's FIRST rapid-acting dose of each local day (day = 03:00 to 03:00 in their time zone; no clock time to set, it is whoever dose comes first
+after waking) lowers glucose by 1/(1 + percent/100) of what its units normally would (25% -> 80%). It changes the forecast only; the dose, the ICR and the ISF are not
+touched, and no forecast value feeds a dose. The size is itself uncertain (half of the reduction is added as relative uncertainty, so the band widens). The flag is
+stored on the dose input of every saved run (`morningResistanceRel`), so a run can be reproduced. A forecast note says when it applied. A what-if dose entered before
+anything else that day counts as the first dose. Doses of earlier hours of today are looked up even beyond the 8 h look-back so "first" is correct.
+
+**What is and is not known.** 25% is an engineering default, not a measured population average: no robust number exists. A paediatric clinic source describes up to twice
+the insulin per gram of carbohydrate at breakfast around puberty (an upper end); type 1 studies of the daily pattern of insulin sensitivity find it lower at breakfast but not
+significantly so, and different in every person. The value should be the person's own; learning it from scored forecasts needs several tens of first doses (a read-only check is
+`docs/absorption-checks/morning_dose_check.sql`; on the 3 mornings stored on 2026-10-20 the forecast ran 31 mg/dL too high at 60 min after the first dose, the opposite direction, from 3 doses
+only, so nothing can be concluded). No automatic learning of this factor exists yet.

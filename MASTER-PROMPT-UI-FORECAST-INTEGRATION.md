@@ -309,6 +309,17 @@ stays "not sent yet", comes back and sends once; (8) light and dark screenshots.
 * (Done on the backend 2026-10-16: per-point IOB/COB, meal `label`, insulin cancel. Nothing else outstanding from this list.)
 * The "clear recent meals" button (`POST /forecast/counterfactual`) is ready server-side; build the UI later as a what-if view (`mealAware.counterfactual` -> banner "What-if view - not a prediction").
 
+## 11b. Insulin settings: "Do you have insulin resistance in the morning?" (backend ready 2026-10-20, not deployed until the user says so)
+
+In the existing insulin-settings screen add one yes/no question: **"Do you have insulin resistance in the morning?"** with the helper text from the backend
+(`morningResistanceExplanation`: the forecast treats your first rapid-acting dose of each day, whenever you wake up, as needing more insulin for the same effect; it
+never changes a dose, your ratio or your correction factor). Read and write it through the existing therapy-settings calls:
+
+- `GET /therapy/settings` now also returns `morningInsulinResistance` (boolean), `morningResistancePercent` (number or null), `morningResistanceUsedPercent` (number or null), `morningResistanceDefaultPercent` (25).
+- `PUT /therapy/settings`: send `morningInsulinResistance: true | false`. Omit it to keep the previous answer. Optional `morningResistancePercent` (0 to 50, one decimal), only together with `true`; leave it out to use the default (show "default: 25%"). Sending `false` clears the percent.
+- Show the percent as an optional "how much more insulin do you usually need for that first dose? (about, %)" field that appears only when the answer is yes; it must be labelled as an estimate that changes the forecast only. Do not show or compute any dose from it.
+- The forecast response then carries a note when it applied ("Morning insulin resistance is on: ..."); show the notes you already show. No other screen changes.
+
 ## 12. Report format
 
 Files changed/added, screens affected, the real output of `typecheck`, `lint`, `check:contrast` and your tests, light/dark screenshots, what you could not verify because the backend is not deployed, and anything in this prompt

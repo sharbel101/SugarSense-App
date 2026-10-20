@@ -108,6 +108,13 @@ SELECT public.t_expect('an absorption class needs a confidence (and the reverse)
 SELECT public.t_expect('a negative glycaemic load is rejected', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, glycemic_load) VALUES (%L, gen_random_uuid(), now(), -1)$q$, :'u_user_id'), '23514');
 SELECT public.t_expect('meal factors must be a JSON object', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, meal_factors) VALUES (%L, gen_random_uuid(), now(), '[1]')$q$, :'u_user_id'), '23514');
 SELECT public.t_expect('a meal without any of the new fields still inserts (older clients)', format($q$INSERT INTO meal_events (user_id, client_uuid, eaten_at, carbs_g, carbs_provenance, status) VALUES (%L, gen_random_uuid(), now(), 30, 'user_entered', 'manual_entry')$q$, :'u_user_id'), 'OK');
+-- 0009: morning insulin resistance
+SELECT public.t_expect('a therapy version defaults to no morning resistance', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source) VALUES (%L, 91, now(), 'user_entered')$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('morning resistance with a percent is accepted', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source, morning_resistance, morning_resistance_percent) VALUES (%L, 92, now(), 'user_entered', true, 30)$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('morning resistance switched on without a percent is accepted (engine default applies)', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source, morning_resistance) VALUES (%L, 93, now(), 'user_entered', true)$q$, :'u_user_id'), 'OK');
+SELECT public.t_expect('a percent while the flag is off is rejected', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source, morning_resistance, morning_resistance_percent) VALUES (%L, 94, now(), 'user_entered', false, 20)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('a percent above 50 is rejected', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source, morning_resistance, morning_resistance_percent) VALUES (%L, 95, now(), 'user_entered', true, 80)$q$, :'u_user_id'), '23514');
+SELECT public.t_expect('a negative percent is rejected', format($q$INSERT INTO therapy_profiles (user_id, version, effective_from, source, morning_resistance, morning_resistance_percent) VALUES (%L, 96, now(), 'user_entered', true, -5)$q$, :'u_user_id'), '23514');
 -- privileges
 SELECT public.t_expect('app role cannot DDL', $q$CREATE TABLE should_not_exist (a int)$q$, '42501');
 SELECT public.t_expect('app role cannot TRUNCATE', $q$TRUNCATE glucose_readings$q$, '42501');

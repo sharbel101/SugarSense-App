@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { DbService } from '../db/db.service.js';
+import { MORNING_RESISTANCE } from '../engine/params.js';
 import type { TherapySettingsInput } from './therapy.schema.js';
 import { localMinuteOfDay, toIso, toSec } from './time.js';
 
@@ -18,6 +19,9 @@ export interface TherapyProfile {
   insulinDurationMin: number | null;
   note: string | null;
   createdAtSec: number;
+  /** The person's answer to "insulin resistance in the morning?" and the percent they gave (null = not given, the default applies). */
+  morningResistance: boolean;
+  morningResistancePercent: number | null;
   icr: Segment[];
   isf: Segment[];
 }
@@ -31,7 +35,13 @@ export interface ResolvedTherapy {
   insulinType: 'rapid' | 'ultra_rapid' | null;
   insulinPeakMin: number | null;
   insulinDurationMin: number | null;
+  /** Percent extra insulin the first dose of the day needs; null = the person has not said they have morning resistance. */
+  morningResistancePercent: number | null;
 }
+
+/** The percent actually used: null when the answer is "no" (or the profile is missing). */
+export const effectiveMorningPercent = (p: Pick<TherapyProfile, 'morningResistance' | 'morningResistancePercent'> | null): number | null =>
+  p && p.morningResistance ? (p.morningResistancePercent ?? MORNING_RESISTANCE.defaultPercent) : null;
 
 const segmentValueAt = (segments: Segment[], minuteOfDay: number): number | null => {
   let value: number | null = null;
@@ -84,6 +94,7 @@ export class TherapyResolver {
         insulinType: null,
         insulinPeakMin: null,
         insulinDurationMin: null,
+        morningResistancePercent: null,
       };
     }
     const minute = localMinuteOfDay(tSec, this.timezone);
@@ -97,6 +108,7 @@ export class TherapyResolver {
       insulinType: chosen.insulinType,
       insulinPeakMin: chosen.insulinPeakMin,
       insulinDurationMin: chosen.insulinDurationMin,
+      morningResistancePercent: effectiveMorningPercent(chosen),
     };
   }
 }
@@ -116,6 +128,14 @@ export interface TherapySettingsView {
   insulinPeakMin: number | null;
   insulinDurationMin: number | null;
   note: string | null;
+  /** The answer to "do you have insulin resistance in the morning?". false for versions saved before the question existed. */
+  morningInsulinResistance: boolean;
+  /** Percent extra insulin the first dose of the day needs, as the person set it; null = not set (the default below is used while the answer is yes). */
+  morningResistancePercent: number | null;
+  /** The percent the forecast actually uses (null while the answer is no). */
+  morningResistanceUsedPercent: number | null;
+  morningResistanceDefaultPercent: number;
+  morningResistanceExplanation: string;
   /** Fixed explanation of what happens while the ratio is missing - there is no default ratio. */
   whenMissing: string;
   disclaimer: string;
@@ -124,6 +144,9 @@ export interface TherapySettingsView {
 export const WHEN_ICR_MISSING =
   'Without an insulin-to-carbohydrate ratio and a correction factor, logged meals are not added to the forecast; ' +
   'the glucose-only forecast is shown instead. No default ratio is assumed.';
+export const MORNING_RESISTANCE_EXPLANATION =
+  'If you answer yes, the forecast treats the first rapid-acting dose of each day (whenever you wake up) as needing more insulin for the same effect. ' +
+  'This changes the forecast only. It never changes a dose, your ratio or your correction factor.';
 export const SETTINGS_DISCLAIMER =
   'These are the values you or your care team entered. SugarSense never changes them automatically and ' +
   'does not recommend insulin doses.';
@@ -143,9 +166,11 @@ export class TherapyService {
       insulin_duration_min: string | null;
       note: string | null;
       created_at: Date;
+      morning_resistance: boolean;
+      morning_resistance_percent: string | null;
     }>(
       `SELECT profile_id, version, effective_from, source, insulin_type, insulin_peak_min,
-              insulin_duration_min, note, created_at
+              insulin_duration_min, note, created_at, morning_resistance, morning_resistance_percent
          FROM therapy_profiles WHERE user_id = $1 ORDER BY effective_from, version`,
       [userId],
     );
@@ -165,6 +190,8 @@ export class TherapyService {
       insulinDurationMin: r.insulin_duration_min === null ? null : Number(r.insulin_duration_min),
       note: r.note,
       createdAtSec: Math.floor(r.created_at.getTime() / 1000),
+      morningResistance: r.morning_resistance,
+      morningResistancePercent: r.morning_resistance_percent === null ? null : Number(r.morning_resistance_percent),
       icr: s.rows.filter((x) => x.profile_id === r.profile_id && x.kind === 'icr').map((x) => ({ startMinute: x.start_minute, value: Number(x.value) })),
       isf: s.rows.filter((x) => x.profile_id === r.profile_id && x.kind === 'isf').map((x) => ({ startMinute: x.start_minute, value: Number(x.value) })),
     }));
@@ -199,8 +226,8 @@ export class TherapyService {
     }
     const created = await this.db.tx(async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(727003)');
-      const latest = await c.query<{ profile_id: string; version: number; insulin_type: string | null; insulin_peak_min: string | null; insulin_duration_min: string | null }>(
-        'SELECT profile_id, version, insulin_type, insulin_peak_min, insulin_duration_min FROM therapy_profiles WHERE user_id = $1 ORDER BY version DESC LIMIT 1',
+      const latest = await c.query<{ profile_id: string; version: number; insulin_type: string | null; insulin_peak_min: string | null; insulin_duration_min: string | null; morning_resistance: boolean; morning_resistance_percent: string | null }>(
+        'SELECT profile_id, version, insulin_type, insulin_peak_min, insulin_duration_min, morning_resistance, morning_resistance_percent FROM therapy_profiles WHERE user_id = $1 ORDER BY version DESC LIMIT 1',
         [userId],
       );
       const prev = latest.rows[0];
@@ -218,11 +245,18 @@ export class TherapyService {
       if (peak !== null && duration !== null && !(peak < duration / 2)) {
         throw new BadRequestException('insulinPeakMin must be less than half of insulinDurationMin');
       }
+      // Morning resistance carries over from the previous version when not sent. Switching it off drops the percent; a percent needs "yes".
+      const morning = input.morningInsulinResistance ?? prev?.morning_resistance ?? false;
+      const prevPct = prev?.morning_resistance_percent != null && morning && prev.morning_resistance ? Number(prev.morning_resistance_percent) : null;
+      if (input.morningResistancePercent !== undefined && !morning) {
+        throw new BadRequestException('morningResistancePercent needs morningInsulinResistance: true');
+      }
+      const morningPct = morning ? (input.morningResistancePercent ?? prevPct) : null;
       const version = (prev?.version ?? 0) + 1;
       const row = await c.query<{ profile_id: string }>(
-        `INSERT INTO therapy_profiles (user_id, version, effective_from, source, insulin_type, insulin_peak_min, insulin_duration_min, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING profile_id`,
-        [userId, version, toIso(effectiveFromSec), input.source, insulinType, peak, duration, input.note ?? null],
+        `INSERT INTO therapy_profiles (user_id, version, effective_from, source, insulin_type, insulin_peak_min, insulin_duration_min, note, morning_resistance, morning_resistance_percent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING profile_id`,
+        [userId, version, toIso(effectiveFromSec), input.source, insulinType, peak, duration, input.note ?? null, morning, morningPct],
       );
       const profileId = row.rows[0]?.profile_id as string;
       for (const s of input.icrSegments) {
@@ -255,6 +289,11 @@ export class TherapyService {
       insulinPeakMin: p?.insulinPeakMin ?? null,
       insulinDurationMin: p?.insulinDurationMin ?? null,
       note: p?.note ?? null,
+      morningInsulinResistance: p?.morningResistance ?? false,
+      morningResistancePercent: p?.morningResistance ? p.morningResistancePercent : null,
+      morningResistanceUsedPercent: effectiveMorningPercent(p),
+      morningResistanceDefaultPercent: MORNING_RESISTANCE.defaultPercent,
+      morningResistanceExplanation: MORNING_RESISTANCE_EXPLANATION,
       whenMissing: WHEN_ICR_MISSING,
       disclaimer: SETTINGS_DISCLAIMER,
     };

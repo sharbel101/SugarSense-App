@@ -91,6 +91,12 @@ export interface InsulinInput {
   isfMgdlPerU: number | null;
   /** Meal the person named for this dose; null when none, or when the named meal was withdrawn (see buildEngineInputs). */
   declaredMealId: string | null;
+  /**
+   * Morning insulin resistance, as the fraction of EXTRA insulin this dose needs for the same effect (0.25 = 25% more, so each unit lowers
+   * glucose 1/1.25 = 80% as much). Set only on the person's first rapid-acting dose of the day and only when they said they have morning
+   * resistance. Absent or 0 = the dose acts normally. It changes the forecast only; it is never an input to a dose.
+   */
+  morningResistanceRel?: number;
 }
 
 export interface MealLink {

@@ -50,6 +50,15 @@ export const FAT_PROTEIN = {
   amplitudeSdFactor: 0.29,
 } as const;
 
+/**
+ * Morning insulin resistance (first rapid-acting dose of the local day). There is no robust population average to quote: a paediatric
+ * clinic source describes up to twice the insulin per gram of carbohydrate at breakfast around puberty (an upper end), while type 1 studies of the
+ * daily pattern of insulin sensitivity find it lower at breakfast but not significantly so and different in every person (Visentin/Dalla Man
+ * 2015, Toffanin 2013, as summarised in search results; full texts not read). 25% extra insulin for the same effect is therefore a mid-range
+ * ENGINEERING DEFAULT (tier E), bounded 0-50%, meant to be replaced by the person's own value. Its uncertainty is half of its size.
+ */
+export const MORNING_RESISTANCE = { defaultPercent: 25, maxPercent: 50, uncertaintyShare: 0.5, dayStartHour: 3 } as const;
+
 /** Normal quantile for the central 80% interval (10th to 90th percentile). */
 export const Z80 = 1.2816;
 export const INTERVAL_LEVEL = 0.8;

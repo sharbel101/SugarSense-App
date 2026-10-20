@@ -108,7 +108,7 @@ describe('time zones and ratio segments', () => {
 
   const profile = (over: Partial<TherapyProfile>): TherapyProfile => ({
     profileId: 1, version: 1, effectiveFromSec: 1000, source: 'user_entered', insulinType: null,
-    insulinPeakMin: null, insulinDurationMin: null, note: null, createdAtSec: 1000,
+    insulinPeakMin: null, insulinDurationMin: null, note: null, createdAtSec: 1000, morningResistance: false, morningResistancePercent: null,
     icr: [{ startMinute: 0, value: 12 }, { startMinute: 720, value: 8 }], isf: [{ startMinute: 0, value: 50 }], ...over,
   });
 

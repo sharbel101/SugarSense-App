@@ -17,6 +17,7 @@ import {
   SHADOW_MARKER,
   TIME_CLASS_RATIO,
   MAX_HORIZON_MIN,
+  MORNING_RESISTANCE,
   STEP_MIN,
 } from '../engine/params.js';
 import { computeRun, hashInputs, type RunInputs } from '../engine/run.js';
@@ -38,7 +39,8 @@ import { ParametersService } from './parameters.service.js';
 import { PersonalizationService } from './personalization.service.js';
 import { PredictionStore, type EventLinkRecord } from './prediction-store.service.js';
 import { TherapyService, type ResolvedTherapy, type TherapyResolver } from './therapy.service.js';
-import { toIso, toSec } from './time.js';
+import { firstDoseIdsOfLocalDays } from './first-dose.js';
+import { localDayStartSec, toIso, toSec } from './time.js';
 import { declaredMealOf, isRapidActing, toLinkable } from './linkable.js';
 import { UsersService } from './users.service.js';
 
@@ -176,6 +178,7 @@ export class ForecastService {
 
     // ---- load events, settings, parameters (all optional: failure degrades to glucose-only) ------
     let userId: string | null = null;
+    let userTz = 'UTC';
     let resolver: TherapyResolver | null = null;
     let mealRows: MealRow[] = [];
     let insulinRows: InsulinRow[] = [];
@@ -187,6 +190,7 @@ export class ForecastService {
       try {
         const user = await this.users.primary();
         userId = user.userId;
+        userTz = user.timezone;
         resolver = await this.therapy.resolver(user.userId, user.timezone);
         [mealRows, insulinRows] = await Promise.all([
           this.events.mealsBetween(user.userId, anchorSec - LOOKBACK_SEC, nowSec + FUTURE_SLACK_SEC),
@@ -242,10 +246,27 @@ export class ForecastService {
       }
     }
 
+    // Morning insulin resistance: which dose is the first of the person's day (only looked up when the setting is on at the anchor).
+    let firstDoseIds: ReadonlySet<string> = new Set();
+    if (resolver && userId && atAnchor.morningResistancePercent !== null) {
+      try {
+        const tz = userTz;
+        const dayStart = localDayStartSec(anchorSec, tz);
+        const earlier = dayStart < anchorSec - LOOKBACK_SEC ? await this.events.insulinBetween(userId, dayStart, anchorSec - LOOKBACK_SEC - 1) : [];
+        const counts = (i: InsulinRow): boolean => i.confirmation !== 'planned' && (i.kind === 'bolus' || i.kind === 'correction') && isRapidActing(i.insulinType) && (i.unitsAdministered ?? 0) > 0;
+        const all = new Map<string, InsulinRow>();
+        for (const r of [...earlier, ...insulinRows]) all.set(r.insulinId, r);
+        firstDoseIds = firstDoseIdsOfLocalDays([...all.values()].filter(counts).map((r) => ({ id: r.insulinId, tSec: r.administeredAtSec })), tz);
+      } catch (err) {
+        this.logger.warn(`first dose of the day not determined ${describeDbError(err)}`);
+        notes.push('Your first dose of the day could not be identified just now, so morning insulin resistance was not applied.');
+      }
+    }
+
     const mode = absorptionMode();
     const candidateIsMain = mode === 'active';
     const mainVersion = candidateIsMain ? ABSORPTION_LAYER_VERSION : ENGINE_LAYER_VERSION;
-    const built = buildEngineInputs({ mealRows, insulinRows, resolver, params, anchorSec, absorption: candidateIsMain ? 'v2' : 'legacy' });
+    const built = buildEngineInputs({ mealRows, insulinRows, resolver, params, anchorSec, absorption: candidateIsMain ? 'v2' : 'legacy', firstDoseIds });
     const knots: [number, number][] = [];
     for (let m = 0; m <= MAX_HORIZON_MIN; m += STEP_MIN) knots.push([m, Math.round(sigmaFn(m) * 100) / 100]);
     const inputs: RunInputs = {
@@ -263,6 +284,11 @@ export class ForecastService {
     };
     const { layer, points } = computeRun(inputs, { forceApplyIds });
     const allDispositions = [...layer.dispositions, ...built.extraDispositions];
+
+    const morningApplied = allDispositions.some((d) => d.eventType === 'insulin' && d.role === 'applied' && built.insulin.some((i) => i.id === d.id && (i.morningResistanceRel ?? 0) > 0));
+    if (morningApplied) {
+      notes.push(`Morning insulin resistance is on: your first dose of the day is treated as needing about ${atAnchor.morningResistancePercent ?? MORNING_RESISTANCE.defaultPercent}% more insulin for the same effect. This is an estimate and only changes the forecast, never a dose.`);
+    }
 
     const timeOf = (e: EventDisposition): number =>
       e.eventType === 'meal'
@@ -330,7 +356,7 @@ export class ForecastService {
         });
         saved = res.runId.length > 0;
         if (mode !== 'off') {
-          await this.persistShadow({ mode, userId, inputs, mainHash: hashInputs(inputs, { therapyProfileId: atAnchor.profileId }), built, mealRows, insulinRows, resolver, params, anchorSec, atAnchor, baselineModel, parameterLabel, forceApplyIds, layer, allDispositions });
+          await this.persistShadow({ firstDoseIds, mode, userId, inputs, mainHash: hashInputs(inputs, { therapyProfileId: atAnchor.profileId }), built, mealRows, insulinRows, resolver, params, anchorSec, atAnchor, baselineModel, parameterLabel, forceApplyIds, layer, allDispositions });
         }
       } catch (err) {
         this.logger.warn(`forecast not saved ${describeDbError(err)}`);
@@ -389,6 +415,7 @@ export class ForecastService {
    * differ (some counted meal has a non-default profile). Failure here never affects the forecast that is shown.
    */
   private async persistShadow(a: {
+    firstDoseIds: ReadonlySet<string>;
     mode: AbsorptionMode;
     userId: string;
     inputs: RunInputs;
@@ -408,7 +435,7 @@ export class ForecastService {
   }): Promise<void> {
     try {
       const candidateIsMain = a.mode === 'active';
-      const alt = buildEngineInputs({ mealRows: a.mealRows, insulinRows: a.insulinRows, resolver: a.resolver, params: a.params, anchorSec: a.anchorSec, absorption: candidateIsMain ? 'legacy' : 'v2' });
+      const alt = buildEngineInputs({ mealRows: a.mealRows, insulinRows: a.insulinRows, resolver: a.resolver, params: a.params, anchorSec: a.anchorSec, absorption: candidateIsMain ? 'legacy' : 'v2', firstDoseIds: a.firstDoseIds });
       const applied = new Set(a.allDispositions.filter((d) => d.eventType === 'meal' && d.role === 'applied').map((d) => d.id));
       const v2Meals = candidateIsMain ? a.built.meals : alt.meals;
       const differs = v2Meals.some((m) => applied.has(m.id) && m.absorption && absorptionDiffersFromLegacy(m, a.params.tauMMin));
@@ -490,6 +517,7 @@ const unavailableTherapy = (): ResolvedTherapy => ({
   insulinType: null,
   insulinPeakMin: null,
   insulinDurationMin: null,
+  morningResistancePercent: null,
 });
 
 const toPointDisplay = (anchorSec: number) => (p: ForecastPoint) => ({
@@ -579,6 +607,8 @@ export function buildEngineInputs(a: {
   anchorSec: number;
   /** 'v2': resolve each meal's absorption profile (absorption.ts); 'legacy' (default): the previous single-component behaviour. The features are recorded either way. */
   absorption?: 'legacy' | 'v2';
+  /** Ids of the doses that are the person's first rapid-acting dose of their local day (see first-dose.ts). With the morning-resistance answer "yes" they act with less effect. */
+  firstDoseIds?: ReadonlySet<string>;
 }): Built {
   const therapyAt = (t: number): ResolvedTherapy => (a.resolver ? a.resolver.at(t) : unavailableTherapy());
   const meals: MealInput[] = a.mealRows.map((m) => {
@@ -655,6 +685,7 @@ export function buildEngineInputs(a: {
         uncertain: i.confirmation === 'uncertain' || i.timingUncertain,
         isfMgdlPerU: t.isfMgdlPerU,
         declaredMealId: declaredMealOf(i),
+        ...(t.morningResistancePercent !== null && a.firstDoseIds?.has(i.insulinId) ? { morningResistanceRel: t.morningResistancePercent / 100 } : {}),
       });
     }
   }

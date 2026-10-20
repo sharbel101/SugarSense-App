@@ -31,3 +31,22 @@ export function localMinuteOfDay(tSec: number, timeZone: string): number {
 
 export const toSec = (iso: string): number => Math.floor(Date.parse(iso) / 1000);
 export const toIso = (sec: number): string => new Date(sec * 1000).toISOString();
+
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Local calendar day (YYYY-MM-DD) of an instant, where the "day" starts at `dayStartHour` local time (default 03:00) rather than midnight. */
+export function localDayKey(tSec: number, timeZone: string, dayStartHour = 3): string {
+  const tz = isValidTimeZone(timeZone) ? timeZone : 'UTC';
+  let f = dayFormatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    dayFormatters.set(tz, f);
+  }
+  return f.format(new Date((tSec - dayStartHour * 3600) * 1000));
+}
+
+/** Unix seconds of the most recent local `dayStartHour`:00 at or before `tSec` (within about an hour on a daylight-saving change day). */
+export function localDayStartSec(tSec: number, timeZone: string, dayStartHour = 3): number {
+  const sinceStartMin = (localMinuteOfDay(tSec, timeZone) - dayStartHour * 60 + 1440) % 1440;
+  return tSec - sinceStartMin * 60;
+}

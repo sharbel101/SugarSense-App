@@ -112,3 +112,10 @@ Additive: `meal_events.absorption_class_ai` / `absorption_confidence` (the visio
 `glycemic_load`, `meal_factors` (jsonb object), `feature_schema_version`, `absorption_class_user` (true when the person chose the speed
 class; backfilled for classes other than the default). Applied to the scratch test database and covered by 6 checks in `db/tests/verify.sql`
 (63 pass); **not yet applied to the production database** (see `docs/ABSORPTION-MODEL.md`, section 8).
+
+## Migration 0009 (morning insulin resistance, 2026-10-20)
+
+Additive: `therapy_profiles.morning_resistance` (boolean, default false) and `morning_resistance_percent` (numeric 0-50, null while the flag is off or when the
+engine default should be used; a CHECK keeps a percent from existing without the flag). Applied to the scratch test database and covered by 6 checks in
+`db/tests/verify.sql` (69 pass, run as postgres: `sudo -u postgres psql -d sugarsense_test -X -v ON_ERROR_STOP=1 -f db/tests/verify.sql`).
+**Not yet applied to the production database.**

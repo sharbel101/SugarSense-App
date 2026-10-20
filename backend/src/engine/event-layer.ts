@@ -1,6 +1,6 @@
 import { profileCumulative } from './absorption.js';
 import { insulinCumulativeAction, insulinRemainingFraction, mealCumulativeAbsorption } from './kernels.js';
-import { FAT_PROTEIN, TIME_CLASS_RATIO, TREND_SLOPE_WINDOW_MIN, UNCERTAIN_INSULIN_TIMING_MIN, trendResponseAt } from './params.js';
+import { FAT_PROTEIN, MORNING_RESISTANCE, TIME_CLASS_RATIO, TREND_SLOPE_WINDOW_MIN, UNCERTAIN_INSULIN_TIMING_MIN, trendResponseAt } from './params.js';
 import type {
   EngineParams,
   EventDisposition,
@@ -198,15 +198,20 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
 
     const tp = dose.ultraRapid ? params.tpUltraMin : params.tpRapidMin;
     const age0 = (anchorSec - dose.tSec) / 60;
+    // Morning resistance: this dose lowers glucose by 1/(1+r) of what its units normally would (the first dose of the day only).
+    const morningRel = Math.max(0, dose.morningResistanceRel ?? 0);
+    const potency = 1 / (1 + morningRel);
     const incAt = (ageMin: number, j: number): number =>
-      dose.isfMgdlPerU! * dose.units *
+      potency * dose.isfMgdlPerU! * dose.units *
       (insulinCumulativeAction(ageMin + (minutes[j] as number), tp, params.tdMin) -
         insulinCumulativeAction(ageMin, tp, params.tdMin));
     for (let j = 0; j < n; j += 1) {
       const inc = incAt(age0, j);
       if (role === 'applied') {
         insulinEffect[j] = (insulinEffect[j] as number) + inc;
-        const rel2 = params.cS ** 2 + (dose.uncertain ? params.uncertainDoseRel ** 2 : 0);
+        // The size of the morning effect is itself an estimate: half of the reduction it causes is added as relative uncertainty.
+        const morningUnc = morningRel > 0 ? (MORNING_RESISTANCE.uncertaintyShare * (1 - potency)) ** 2 : 0;
+        const rel2 = params.cS ** 2 + (dose.uncertain ? params.uncertainDoseRel ** 2 : 0) + morningUnc;
         varIns[j] = (varIns[j] as number) + (params.mIsf * inc) ** 2 * rel2;
         if (dose.uncertain) {
           const spread =
@@ -219,7 +224,7 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
     }
     if (role === 'applied') {
       slopeInsulin +=
-        (dose.isfMgdlPerU * dose.units * (insulinCumulativeAction(age0, tp, params.tdMin) - insulinCumulativeAction(age0 - TREND_SLOPE_WINDOW_MIN, tp, params.tdMin))) /
+        (potency * dose.isfMgdlPerU * dose.units * (insulinCumulativeAction(age0, tp, params.tdMin) - insulinCumulativeAction(age0 - TREND_SLOPE_WINDOW_MIN, tp, params.tdMin))) /
         TREND_SLOPE_WINDOW_MIN;
       appliedInsulin += 1;
     }
