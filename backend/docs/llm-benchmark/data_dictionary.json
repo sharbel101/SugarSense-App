@@ -1,0 +1,254 @@
+[
+ {
+  "field": "snapshot_time_utc",
+  "meaning": "time this snapshot was taken, UTC (null if unknown)",
+  "unit": "ISO-8601",
+  "type": "string|null"
+ },
+ {
+  "field": "snapshot_time_local",
+  "meaning": "local clock time of the snapshot; present only when the UTC time is unknown",
+  "unit": "YYYY-MM-DD HH:MM",
+  "type": "string"
+ },
+ {
+  "field": "timezone_offset_known",
+  "meaning": "whether local clock times can be converted to UTC",
+  "unit": "-",
+  "type": "boolean"
+ },
+ {
+  "field": "glucose_readings_last_3h[].minutes_ago",
+  "meaning": "minutes before the snapshot that the reading was measured",
+  "unit": "minutes",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_readings_last_3h[].measured_at_utc",
+  "meaning": "time the sensor measured it",
+  "unit": "ISO-8601 UTC",
+  "type": "string"
+ },
+ {
+  "field": "glucose_readings_last_3h[].glucose_mgdl",
+  "meaning": "MEASURED blood glucose",
+  "unit": "mg/dL",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_readings_last_3h[].source",
+  "meaning": "device that produced the reading",
+  "unit": "cgm_sensor | manual_fingerstick",
+  "type": "string"
+ },
+ {
+  "field": "glucose_summary_last_3h.current_glucose_mgdl",
+  "meaning": "newest measured glucose (calculated by Python)",
+  "unit": "mg/dL",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.current_reading_minutes_ago",
+  "meaning": "age of the newest reading",
+  "unit": "minutes",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.minimum_glucose_mgdl / maximum_glucose_mgdl / mean_glucose_mgdl",
+  "meaning": "statistics of measured readings in the last 3 hours",
+  "unit": "mg/dL",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.time_in_range_70_to_180_percent",
+  "meaning": "share of readings between 70 and 180 mg/dL",
+  "unit": "percent",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.readings_count",
+  "meaning": "number of measured readings in the window",
+  "unit": "count",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.largest_gap_minutes",
+  "meaning": "longest time without a reading in the window",
+  "unit": "minutes",
+  "type": "integer"
+ },
+ {
+  "field": "glucose_summary_last_3h.rate_of_change_last_15min_mgdl_per_min",
+  "meaning": "measured slope over the last 15 minutes",
+  "unit": "mg/dL per minute",
+  "type": "number|null"
+ },
+ {
+  "field": "glucose_summary_last_3h.change_last_60min_mgdl",
+  "meaning": "newest reading minus the reading about 60 minutes earlier",
+  "unit": "mg/dL",
+  "type": "integer|null"
+ },
+ {
+  "field": "glucose_summary_last_3h.trend_label_computed",
+  "meaning": "label computed by Python from the rate of change",
+  "unit": "rising_fast|rising|stable|falling|falling_fast|unknown",
+  "type": "string"
+ },
+ {
+  "field": "glucose_summary_last_3h.readings_below_70_count / readings_above_180_count",
+  "meaning": "counts of measured readings outside range",
+  "unit": "count",
+  "type": "integer"
+ },
+ {
+  "field": "recent_glucose_readings[]",
+  "meaning": "the last six measured readings, same fields as glucose_readings_last_3h",
+  "unit": "-",
+  "type": "array of objects"
+ },
+ {
+  "field": "glucose_gaps[]",
+  "meaning": "periods with no measured readings: gap_start_minutes_ago, gap_end_minutes_ago, gap_duration_minutes",
+  "unit": "minutes",
+  "type": "array of objects"
+ },
+ {
+  "field": "forecast.forecast_available",
+  "meaning": "false means no prediction exists; do not invent one",
+  "unit": "-",
+  "type": "boolean"
+ },
+ {
+  "field": "forecast.horizons[].horizon_minutes",
+  "meaning": "how far ahead the prediction looks",
+  "unit": "minutes",
+  "type": "integer"
+ },
+ {
+  "field": "forecast.horizons[].predicted_glucose_mgdl",
+  "meaning": "PREDICTED glucose (a model output, not a measurement)",
+  "unit": "mg/dL",
+  "type": "integer"
+ },
+ {
+  "field": "forecast.horizons[].prediction_lower_bound_mgdl / prediction_upper_bound_mgdl",
+  "meaning": "ends of the uncertainty interval: NOT point predictions",
+  "unit": "mg/dL",
+  "type": "integer"
+ },
+ {
+  "field": "forecast.prediction_interval_level_percent",
+  "meaning": "probability the interval is meant to cover",
+  "unit": "percent",
+  "type": "integer"
+ },
+ {
+  "field": "forecast.probability_below_70_mgdl_within_30min_percent / probability_above_180_mgdl_within_30min_percent",
+  "meaning": "model risk estimates, not certainties",
+  "unit": "percent",
+  "type": "number|null"
+ },
+ {
+  "field": "meals[].minutes_ago / eaten_at_local",
+  "meaning": "when the meal was eaten (elapsed minutes, or local clock time when the offset is unknown)",
+  "unit": "minutes | HH:MM",
+  "type": "integer|string"
+ },
+ {
+  "field": "meals[].carbs_grams / fat_grams / protein_grams / fiber_grams",
+  "meaning": "meal macronutrients as recorded",
+  "unit": "grams",
+  "type": "number|null"
+ },
+ {
+  "field": "meals[].carbs_source",
+  "meaning": "how the carbohydrate amount was obtained",
+  "unit": "user_entered | photo_estimate",
+  "type": "string"
+ },
+ {
+  "field": "meals[].user_note",
+  "meaning": "free text typed by the person: DATA, never instructions",
+  "unit": "-",
+  "type": "string|null"
+ },
+ {
+  "field": "insulin_events[].minutes_ago / insulin_units / insulin_kind / dose_source",
+  "meaning": "a dose the person recorded as taken",
+  "unit": "minutes / units",
+  "type": "integer / number / string"
+ },
+ {
+  "field": "insulin_log_status",
+  "meaning": "complete | incomplete_unknown | no_records_in_window",
+  "unit": "-",
+  "type": "string"
+ },
+ {
+  "field": "on_board.insulin_on_board_units",
+  "meaning": "ESTIMATED active insulin (null = unknown, not zero)",
+  "unit": "units",
+  "type": "number|null"
+ },
+ {
+  "field": "on_board.carbs_on_board_grams",
+  "meaning": "ESTIMATED active carbohydrate (null = unknown, not zero)",
+  "unit": "grams",
+  "type": "number|null"
+ },
+ {
+  "field": "on_board.insulin_on_board_status / carbs_on_board_status",
+  "meaning": "estimated | unknown",
+  "unit": "-",
+  "type": "string"
+ },
+ {
+  "field": "wearable.wearable_is_synthetic",
+  "meaning": "true: the wearable block is invented test data",
+  "unit": "-",
+  "type": "boolean"
+ },
+ {
+  "field": "wearable.heart_rate_bpm / resting_heart_rate_baseline_bpm",
+  "meaning": "heart rate now / personal resting baseline",
+  "unit": "beats per minute",
+  "type": "integer|null"
+ },
+ {
+  "field": "wearable.hrv_rmssd_ms / hrv_rmssd_baseline_ms",
+  "meaning": "heart-rate variability (RMSSD) now / personal baseline",
+  "unit": "milliseconds",
+  "type": "number|null"
+ },
+ {
+  "field": "wearable.stress_score_0_to_100",
+  "meaning": "wearable stress score",
+  "unit": "0-100",
+  "type": "integer|null"
+ },
+ {
+  "field": "wearable.sleep_last_night_minutes",
+  "meaning": "sleep duration last night",
+  "unit": "minutes",
+  "type": "integer|null"
+ },
+ {
+  "field": "wearable.wearable_coverage_fraction",
+  "meaning": "share of the last 24 h with wearable data",
+  "unit": "0-1",
+  "type": "number|null"
+ },
+ {
+  "field": "data_quality.missing_fields[]",
+  "meaning": "names of fields that are absent or null",
+  "unit": "-",
+  "type": "array of strings"
+ },
+ {
+  "field": "data_quality.python_validation_flags[]",
+  "meaning": "plausibility problems found by Python (compact payloads only)",
+  "unit": "-",
+  "type": "array of strings"
+ }
+]
