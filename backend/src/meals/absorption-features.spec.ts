@@ -112,7 +112,7 @@ describe('glycaemic load (derived, never asked of the model)', () => {
 
 describe('prompt and Gemini JSON schema', () => {
   it('the prompt is versioned and instructs the model on the absorption fields without inventing GI', () => {
-    expect(PROMPT_VERSION).toBe('meal-analysis-v2');
+    expect(PROMPT_VERSION).toBe('meal-analysis-v3');
     expect(FEATURE_SCHEMA_VERSION).toBe('meal-features-v2');
     const p = buildMealAnalysisSystemPrompt();
     for (const word of ['absorptionClass', 'absorptionConfidence', 'preparationAndMixtureFactors', 'moderate_fast', 'slow_delayed', 'moderate_mixed']) expect(p).toContain(word);
@@ -120,6 +120,16 @@ describe('prompt and Gemini JSON schema', () => {
     expect(p).toMatch(/GLYCAEMIC INDEX IS OPTIONAL AND NEVER HIGH CONFIDENCE/);
     expect(p).toMatch(/Do NOT choose the class from a food name alone/);
     expect(p).toMatch(/never mention insulin units/);
+  });
+
+  it('v3 asks for hidden fat and for fibre, without redefining carbohydrate or inviting inflated fibre', () => {
+    const p = buildMealAnalysisSystemPrompt();
+    expect(p).toMatch(/totalFatG: include fat you cannot see/);
+    expect(p).toMatch(/totalFiberG: estimate the dietary fibre/);
+    expect(p).toMatch(/do not change the\s+carbohydrate figure because of it/);
+    expect(p).toMatch(/do not inflate fibre/);
+    expect(p).toMatch(/use 0 only for a meal with clearly no fibre/);
+    expect(p).not.toMatch(/net carbohydrate (is|means)|total carbohydrate minus/i); // the carbohydrate definition is unchanged
   });
 
   it('the schema sent to Gemini carries the four classes and the factor enums, derived from the same Zod schema', () => {
@@ -139,7 +149,7 @@ describe('MealsService - the response contract', () => {
     const res = await svc({ ...withFeatures, estimatedGlycemicIndex: 60, glycemicIndexConfidence: 'medium' }).analyzeMeal(photo);
     expect(res.status).toBe('ok');
     if (res.status !== 'ok') return;
-    expect(res).toMatchObject({ absorptionClass: 'slow_delayed', absorptionConfidence: 'medium', glycemicLoadEstimate: 36, featureSchemaVersion: 'meal-features-v2', promptVersion: 'meal-analysis-v2' });
+    expect(res).toMatchObject({ absorptionClass: 'slow_delayed', absorptionConfidence: 'medium', glycemicLoadEstimate: 36, featureSchemaVersion: 'meal-features-v2', promptVersion: 'meal-analysis-v3' });
     expect(res.preparationAndMixtureFactors?.mixedMeal).toBe(true);
     // existing contract fields are untouched
     expect(res.totalNetCarbsG).toBe(60);

@@ -44,7 +44,7 @@ model or Mode B can use them later without re-deriving anything.
 | horizon 4 h | 3 h (36 steps) | Unchanged. The delayed part keeps absorbing beyond 3 h; the profile curve is tested to 300+ min. |
 | learned residual, per-user shrinkage | GRU baseline + two shrunk scales | New parameters are fixed bounded population defaults, not fitted. |
 
-## 2. Feature schema "meal-features-v2" and prompt "meal-analysis-v2"
+## 2. Feature schema "meal-features-v2" and prompt "meal-analysis-v3"
 
 Existing fields kept (names unchanged): `items`, `totalNetCarbsG` (+ range), `totalFatG`, `totalProteinG`, `totalFiberG`,
 `estimatedGlycemicIndex`, `glycemicIndexConfidence` (never "high"), `analysisNotes`. **Added** (all nullable; null = not provided):

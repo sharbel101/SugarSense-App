@@ -70,7 +70,7 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
       absorption_class_ai: 'slow_delayed',
       absorption_confidence: 'medium',
       feature_schema_version: 'meal-features-v2',
-      prompt_version: 'meal-analysis-v2',
+      prompt_version: 'meal-analysis-v3',
       absorption_class: 'medium', // what the PERSON chose is separate and untouched
       absorption_class_user: false,
       gi_confidence: 'medium',

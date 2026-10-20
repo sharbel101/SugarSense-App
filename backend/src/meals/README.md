@@ -121,7 +121,7 @@ Optional request fields: `clientId` (a retry maps to the same meal event) and `e
 The Gemini schema and prompt are unchanged (fat, protein, fibre, GI and the carbohydrate range were already returned).
 Contract: `../forecasting/README.md`.
 
-## Absorption features (prompt `meal-analysis-v2`, feature schema `meal-features-v2`, added 2026-10-18, additive)
+## Absorption features (prompt `meal-analysis-v3` (v2 plus explicit fat/protein/fibre guidance, 2026-10-20), feature schema `meal-features-v2`, added 2026-10-18, additive)
 
 The analysis also returns `absorptionClass` (`fast` / `moderate_fast` / `moderate_mixed` / `slow_delayed`), `absorptionConfidence`,
 `preparationAndMixtureFactors` and a server-computed `glycemicLoadEstimate` (GI x net carbs / 100, only when GI is medium-confidence and the

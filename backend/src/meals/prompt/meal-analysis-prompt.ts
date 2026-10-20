@@ -4,6 +4,9 @@
  * it is stored on every meal record, successful or not, so a historical prediction can always be
  * traced back to the exact instructions that produced it (CLAUDE.md section 3, invariant 4).
  *
+ * v3 (2026-10-20) only sharpens rule 7: fibre and hidden fat are now asked for explicitly, because the forecast uses fibre (slower absorption) and fat
+ * (delayed absorption) and the first absorption scans left fibre empty. It changes no schema field and no carbohydrate definition.
+ *
  * NOTE ON PROVENANCE (v1; v2 added rule 8 and the absorption fields): no verbatim prompt/schema text was present in the task that requested this
  * endpoint (the message referred to "the system prompt and JSON schema I've specified (given
  * above)", but no such text appears earlier in this conversation). This wording was authored from
@@ -12,7 +15,7 @@
  * explicit "no food" / "unidentified" states. Treat this as a first draft - if there is an existing
  * exact wording elsewhere, swap it in here and bump PROMPT_VERSION.
  */
-export const PROMPT_VERSION = 'meal-analysis-v2';
+export const PROMPT_VERSION = 'meal-analysis-v3';
 
 /**
  * Version of the structured feature set the analysis returns (carbohydrates, fat, protein, fibre, GI, absorption class and its
@@ -63,8 +66,16 @@ Hard rules:
    report zeros, which would be indistinguishable from a genuine zero-carb meal.
 6. ITEM NAMES MUST BE SPECIFIC. Name what you actually see ("grilled chicken breast with breadcrumb
    coating", not "food" or "item" or "unidentified food").
-7. Extract fat and protein because they change how long carbohydrate absorption takes (a
-   high-fat/high-protein meal absorbs later and slower) - not to report calories for their own sake.
+7. Extract fat, protein and fibre because they change how long carbohydrate absorption takes (a
+   high-fat/high-protein meal absorbs later and slower; fibre-rich food absorbs slower) - not to report calories for their own sake.
+   - totalFatG: include fat you cannot see as well as fat you can: cooking oil, butter, cheese, cream, dressings and sauces, fried
+     coatings, fatty cuts of meat. Do not report only the fat that is visible on the plate.
+   - totalProteinG: all protein sources (meat, fish, eggs, dairy, legumes, nuts), for the whole portion in the photo.
+   - totalFiberG: estimate the dietary fibre of the whole portion in grams (legumes, whole grains, vegetables, fruit with skin, nuts and
+     seeds are the main sources). Give your best estimate whenever the food is identifiable; use 0 only for a meal with clearly no fibre
+     (juice, white bread alone, plain meat); use null only if you genuinely cannot tell. Fibre is reported separately: do not change the
+     carbohydrate figure because of it, and do not inflate fibre to look thorough.
+   Fat, protein and fibre estimates from one photo are uncertain too; when composition is a guess, say so in absorptionConfidence.
 8. ABSORPTION PROFILE (absorptionClass, absorptionConfidence, preparationAndMixtureFactors). These describe the LIKELY SHAPE
    of how quickly the carbohydrate in this whole meal reaches the blood - an estimated profile, never a promised glucose curve.
    Choose ONE absorptionClass from the whole meal, reasoning from the carbohydrate form, its processing and the fat/protein:
