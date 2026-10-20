@@ -112,13 +112,13 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
       'SELECT model_version, feature_config, input_snapshot AS snapshot, inputs_hash FROM predictions WHERE user_id = $1 ORDER BY model_version, horizon_min',
       [rig.userId],
     );
-    const shadow = stored.rows.filter((r) => r.model_version === 'meal-aware-0.2-shadow+direct_120');
+    const shadow = stored.rows.filter((r) => r.model_version === 'meal-aware-0.3-shadow+direct_120');
     const main = stored.rows.filter((r) => r.model_version === 'meal-aware-0.1+direct_120');
     expect(shadow.length).toBeGreaterThan(0);
     expect(shadow.every((r) => r.snapshot.role === 'meal_aware_shadow')).toBe(true);
     expect(shadow.every((r) => main.some((m) => m.inputs_hash === r.snapshot.shadowOf))).toBe(true);
     expect(stored.rows.filter((r) => r.model_version.includes('-shadow+') && r.feature_config === 'glucose_only')).toEqual([]); // no duplicate baseline rows
-    expect(await count(rig, "SELECT COUNT(*) AS n FROM prediction_event_links l JOIN forecast_runs r USING (run_id) WHERE r.user_id = $1 AND r.layer_version = 'meal-aware-0.2'", [rig.userId])).toBe(0);
+    expect(await count(rig, "SELECT COUNT(*) AS n FROM prediction_event_links l JOIN forecast_runs r USING (run_id) WHERE r.user_id = $1 AND r.layer_version = 'meal-aware-0.3'", [rig.userId])).toBe(0);
     // a meal with no non-default profile creates no shadow at all (nothing to compare)
     expect(await count(control, "SELECT COUNT(*) AS n FROM predictions WHERE user_id = $1 AND model_version LIKE '%-shadow+%'", [control.userId])).toBe(0);
   });
@@ -132,7 +132,7 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
     const legacy = ok(await rig.forecast.run());
     setMode('active');
     const cand = ok(await rig.forecast.run());
-    expect(cand.models.eventLayer).toBe('meal-aware-0.2');
+    expect(cand.models.eventLayer).toBe('meal-aware-0.3');
     expect(at(cand, 60).adjusted).toBeLessThan(at(legacy, 60).adjusted - 5); // slower early rise
     expect(at(cand, 120).adjusted).toBeLessThan(at(legacy, 120).adjusted);
     const rise = (f: ForecastOkDisplay) => at(f, 180).adjusted - at(f, 120).adjusted;
@@ -141,19 +141,19 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
     for (const p of cand.points) for (const v of [p.adjusted, p.low, p.high]) expect(Number.isFinite(v)).toBe(true);
 
     const versions = (await rig.db.query<{ v: string }>('SELECT DISTINCT model_version AS v FROM predictions WHERE user_id = $1 ORDER BY 1', [rig.userId])).rows.map((r) => r.v);
-    expect(versions).toContain('meal-aware-0.2+direct_120');
+    expect(versions).toContain('meal-aware-0.3+direct_120');
     expect(versions).toContain('meal-aware-0.1-shadow+direct_120');
 
     // reproducibility: the stored run holds the features AND the resolved profile, and replaying it gives the stored forecast
     const run = (
       await rig.db.query<{ input_snapshot: { inputs: RunInputs }; trajectory: { minutes: number; adjusted: number }[] }>(
-        "SELECT input_snapshot, trajectory FROM forecast_runs WHERE user_id = $1 AND layer_version = 'meal-aware-0.2' ORDER BY created_at DESC LIMIT 1",
+        "SELECT input_snapshot, trajectory FROM forecast_runs WHERE user_id = $1 AND layer_version = 'meal-aware-0.3' ORDER BY created_at DESC LIMIT 1",
         [rig.userId],
       )
     ).rows[0]!;
     const m = run.input_snapshot.inputs.meals[0]!;
     expect(m.absorptionFeatures).toMatchObject({ aiClass: 'slow_delayed', aiConfidence: 'medium', fatG: 45, proteinG: 35, giEstimate: 65, giConfidence: 'medium' });
-    expect(m.absorption).toMatchObject({ version: 'absorption-v2' });
+    expect(m.absorption).toMatchObject({ version: 'absorption-v3' });
     expect(m.absorption!.source).toContain('class+macros');
     expect(m.absorption!.phi).toBeGreaterThan(0.3);
     const replay = computeRun(run.input_snapshot.inputs);
@@ -197,7 +197,7 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
     const runs = await count(rig, 'SELECT COUNT(*) AS n FROM forecast_runs WHERE user_id = $1', [rig.userId]);
     const p = ok(await rig.forecast.preview({ mealId: id }));
     expect(p.preview).toBe(true);
-    expect(p.models.eventLayer).toBe('meal-aware-0.2');
+    expect(p.models.eventLayer).toBe('meal-aware-0.3');
     setMode('shadow');
     const q = ok(await rig.forecast.preview({ mealId: id }));
     expect(at(p, 60).adjusted).toBeLessThan(at(q, 60).adjusted);
@@ -232,7 +232,7 @@ describe.skipIf(!hasTestDb)('glycaemic-response-aware absorption, end to end on 
       const rows = await rig.personalization.absorptionShadowComparison(rig.userId);
       expect(rows.length).toBeGreaterThan(0);
       const h120 = rows.find((r) => r.horizonMin === 120)!;
-      expect(h120).toMatchObject({ shownModel: 'meal-aware-0.1+direct_120', shadowModel: 'meal-aware-0.2-shadow+direct_120' });
+      expect(h120).toMatchObject({ shownModel: 'meal-aware-0.1+direct_120', shadowModel: 'meal-aware-0.3-shadow+direct_120' });
       expect(h120.n).toBeGreaterThan(5);
       expect(h120.maeShadow).toBeLessThan(h120.maeShown); // truth was generated with the delayed profile
       for (const r of rows) for (const v of [r.maeShown, r.maeShadow, r.rmseShown, r.rmseShadow, r.coverageShown, r.coverageShadow]) expect(Number.isFinite(v)).toBe(true);

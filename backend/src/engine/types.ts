@@ -36,6 +36,12 @@ export interface AbsorptionProfile {
   source: string;
   /** 0..1: share of the shift away from the default profile that is treated as uncertain (widens the band, never moves the line). */
   uncertaintyWeight: number;
+  /**
+   * Extra, late glucose appearance from fat and protein, in grams of carbohydrate EQUIVALENT (0 or absent = none). Unlike phi it adds
+   * glucose instead of moving it: published matched-insulin studies in type 1 diabetes show glucose 3-5 h after a high-fat/high-protein
+   * meal that stays higher than the carbohydrate alone explains. It follows the delayed component's timing (delayMin, tauSlowMin).
+   */
+  extraEquivalentG?: number;
 }
 
 export type CarbProvenance = 'estimated' | 'user_corrected' | 'user_entered';

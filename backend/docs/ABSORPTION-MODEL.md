@@ -1,7 +1,26 @@
-# Glycemic-response-aware meal absorption ("absorption-v2")
+# Glycemic-response-aware meal absorption ("absorption-v3", first written as v2)
 
 Status 2026-10-18: implemented, tested on a scratch PostgreSQL, **not deployed** (needs migration `0008` and a push; see "Deployment").
 Deployed behaviour stays the incumbent until `ABSORPTION_MODE=active`. Nothing here is clinically validated.
+
+## 0. Update 2026-10-20: external check and what changed (v2 -> v3)
+
+**Changed in v3 (candidate `meal-aware-0.3`, shadow only; the shown forecast is unchanged):** fibre slowing 0.01 -> 0.05 per gram (cap 15 g, so up to +75% on tau_fast). Nothing else. The version labels were bumped so the new shadow rows do not mix with the `meal-aware-0.2` ones already stored.
+
+**Why only that.** The checks (scripts in `docs/absorption-checks/`, data not stored in the repo):
+
+| Check | Data | Finding |
+|---|---|---|
+| Fibre, fat, protein, carbohydrate vs post-meal curve | CGMacros (PhysioNet, CC BY-NC-SA 4.0): 872 isolated meals, 37 people, **not type 1 diabetes, no insulin** | Per 10 g more fibre, within a person: peak ~5 min later (95% CI 1 to 12) and ~12 mg/dL lower (-22 to -8). Fat: peak time barely moves (+0.2 min per 10 g, CI -1 to +2.5); protein: slightly lower peak. Cross-validated by person, letting fibre slow appearance cut the 0-180 min curve error from 47.3 to 44.1 mg/dL at 0.05/g and to 39.6 fully free (v2's 0.01/g gave 46.5). The error falls steadily with a stronger effect; 0.05 is a deliberately conservative middle because fibre also stands in for food type. |
+| Fat/protein vs published type 1 results | Smart 2013 (n=33 children, 30 g carbohydrate, same insulin): time to peak 79 / 96 / 126 / 143 min for low-fat-low-protein / high-protein / high-fat / both; excess glucose at 3 h +34 and +67 mg/dL for protein and both | **Not reproduced.** With insulin matched to the carbohydrate, every version of this engine (incumbent and v2/v3) puts the peak earlier and lower for fat/protein meals (90 -> 80 -> 75 -> 60 min), the opposite of the study, because delayed carbohydrate lets the insulin win early and the engine adds no glucose beyond the carbohydrate. Wolpert 2013 (n=7): time of maximum appearance 71 -> 102 min with 60 g fat; v2/v3 move it only with very high protein plus fat (40 -> 93 min at 40 g protein). |
+| Calibrating an "extra late glucose" term (carbohydrate-equivalent g per g of fat/protein, off by default, knobs `equivalentPerFatG/ProteinG`, `stretchPerFatG/ProteinG`) | the Smart numbers above, engine at horizon 300 | The engine cannot reproduce a peak at 2-2.5 h with a late excess: there is no return-to-target term, so any extra that is large enough to match the 3-5 h excess keeps rising to the horizon edge. Not adopted. |
+| Same extra term on the person's own stored forecasts | 9 meals, 297 pairs at 2-3 h | 0.1 g/g reduces late bias 14.5 -> 6.0 mg/dL (MAE 44.0 -> 42.9; 4 meals better, 2 worse, 3 unchanged); 0.2 g/g over-corrects (bias -2.5, 4 worse); the published-sized 0.35-0.5 g/g over-predicts badly (MAE 47-57). Too few meals to adopt anything; it points to a **per-person learned scale**, not a population constant. |
+| Retrospective replay of all stored real forecasts | 24 distinct meals, 143-205 pairs per horizon | Incumbent -> v2 -> v3: MAE at 120 min 49.6 -> 45.4 -> 45.0, at 180 min 63.2 -> 43.1 -> 43.0; bias at 180 min +47.7 -> +17.8 -> +16.1; 80% interval coverage at 120 min 0.82 -> 0.94 -> 0.95. 15 min is slightly worse (12.0 -> 12.3 -> 12.4). v3 differs from v2 by under 0.5 mg/dL because only two stored meals have fibre recorded. Autocorrelated runs and few meals: a direction, not proof. |
+
+**Correction.** An earlier message said a GI estimate with *high* confidence is ignored. The feature schema only allows `medium` or `low`, so that case cannot occur; no change was made.
+
+**Not done / still open:** a type 1 model of fat/protein that reproduces a later peak (needs a return-to-target term and per-person scaling); validating the fibre value on type 1 data; GI effect size (no source found).
+
 
 ## 1. What the running system actually does (traced, not assumed)
 

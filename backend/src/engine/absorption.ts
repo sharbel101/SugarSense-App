@@ -3,7 +3,7 @@ import { TIME_CLASS_RATIO } from './params.js';
 import type { AbsorptionClass, AbsorptionFeatures, AbsorptionProfile } from './types.js';
 
 /**
- * Meal-aware carbohydrate absorption profile ("absorption-v2").
+ * Meal-aware carbohydrate absorption profile ("absorption-v3").
  *
  * Design source: SugarSense-Technical-Reference.pdf section 6.3.1 (rate of appearance Ra(t; D, t_max) and the two-component mixture
  * for high-fat / high-protein meals) and section 5.6 (fat and protein delay gastric emptying and add a late, prolonged rise).
@@ -23,7 +23,7 @@ import type { AbsorptionClass, AbsorptionFeatures, AbsorptionProfile } from './t
  * class is available.
  */
 
-export const ABSORPTION_VERSION = 'absorption-v2';
+export const ABSORPTION_VERSION = 'absorption-v3';
 
 export const ABSORPTION_PARAMS = {
   /** tau_fast as a multiple of the base gut time constant tauM (40 min): fast 25 min (reference: 20-30), moderate-fast 32.5, mixed 40 (reference: 40-50, engine default). */
@@ -44,10 +44,24 @@ export const ABSORPTION_PARAMS = {
   /** A class of "slow_delayed" implies at least this delayed fraction / delay even when fat and protein are not reported. Scaled by confidence. */
   slowClassPhiFloor: 0.3,
   slowClassDeltaFloorMin: 45,
-  /** Fibre slows carbohydrate absorption a little: tau_fast * (1 + 0.01 per g, at most 15 g). Weak evidence, small and capped. Tier E. */
-  fiberSlowingPerG: 0.01,
+  /**
+   * Fibre slows carbohydrate appearance: tau_fast * (1 + 0.05 per g, at most 15 g, so at most +75%). v2 used 0.01 per g.
+   * Evidence (docs/absorption-checks, CGMacros PhysioNet, 872 isolated meals, 37 people, not type 1 diabetes): letting fibre slow the
+   * appearance cut the held-out-people error of the post-meal curve monotonically (47.3 mg/dL with none, 46.5 at 0.01/g, 44.1 at 0.05/g,
+   * 41.9 at 0.10/g, 39.6 fully free); within-person, 10 g more fibre meant a peak about 5 min later and about 12 mg/dL lower. Fibre also stands in
+   * for the kind of food (legumes, whole grains), so 0.05 is a deliberately conservative middle, not the best-fitting value. Tier E.
+   */
+  fiberSlowingPerG: 0.05,
   fiberCapG: 15,
-  /** GI (medium confidence only) at or above this nudges an otherwise unclassified meal to "moderate_fast". Never used otherwise. */
+  /** Fat/protein stretch the early component too (published time to peak moves later, not only a tail appears): tau_fast * (1 + min(max, S_F*max(0,fat-F0) + S_P*max(0,protein-P0))). 0 = off. */
+  stretchPerFatG: 0,
+  stretchPerProteinG: 0,
+  stretchMax: 1,
+  /** Extra late glucose appearance, grams of carbohydrate equivalent: min(max, E_F*max(0,fat-F0) + E_P*max(0,protein-P0)). 0 = off. */
+  equivalentPerFatG: 0,
+  equivalentPerProteinG: 0,
+  equivalentMaxG: 40,
+  /** GI (medium confidence; the feature schema only allows medium or low) at or above this nudges an otherwise unclassified meal to "moderate_fast". Never used otherwise. */
   giFastThreshold: 70,
   tauFastBoundsMin: { min: 12, max: 120 },
   /** Share of the shift away from the default profile that is treated as uncertain, by evidence quality. */
@@ -99,7 +113,9 @@ export function resolveAbsorptionProfile(f: AbsorptionFeatures, tauMMin: number)
   const P = ABSORPTION_PARAMS;
 
   const fiberFactor = 1 + P.fiberSlowingPerG * Math.min(fiber ?? 0, P.fiberCapG);
-  const tauFast = clamp(tauMMin * P.tauRatio[cls] * fiberFactor, P.tauFastBoundsMin.min, P.tauFastBoundsMin.max);
+  const stretch = clamp(P.stretchPerFatG * Math.max(0, (fat ?? 0) - P.fatOnsetG) + P.stretchPerProteinG * Math.max(0, (protein ?? 0) - P.proteinOnsetG), 0, P.stretchMax);
+  const tauFast = clamp(tauMMin * P.tauRatio[cls] * fiberFactor * (1 + stretch), P.tauFastBoundsMin.min, P.tauFastBoundsMin.max);
+  const extra = clamp(P.equivalentPerFatG * Math.max(0, (fat ?? 0) - P.fatOnsetG) + P.equivalentPerProteinG * Math.max(0, (protein ?? 0) - P.proteinOnsetG), 0, P.equivalentMaxG);
 
   const phiMacro = clamp(P.phiPerFatG * Math.max(0, (fat ?? 0) - P.fatOnsetG) + P.phiPerProteinG * Math.max(0, (protein ?? 0) - P.proteinOnsetG), 0, P.phiMax);
   const phiClass = cls === 'slow_delayed' ? P.slowClassPhiFloor * confFactor : 0;
@@ -108,19 +124,22 @@ export function resolveAbsorptionProfile(f: AbsorptionFeatures, tauMMin: number)
     phi > 0
       ? clamp(Math.max(P.deltaPerFatMin * (fat ?? 0), cls === 'slow_delayed' ? P.slowClassDeltaFloorMin * confFactor : 0, P.deltaMinWhenDelayedMin), P.deltaMinWhenDelayedMin, P.deltaMaxMin)
       : 0;
-  if (phiMacro > 0) sources.push('macros');
+  if (phiMacro > 0 || stretch > 0 || extra > 0) sources.push('macros');
   if (fiber !== null && fiber > 0 && sources.length > 0) sources.push('fibre');
 
-  const shifted = Math.abs(tauFast - tauMMin) > 0.5 || phi > 0;
-  const weight = shifted ? Math.max(classWeight, phiMacro > 0 ? W.macros : 0, fiber ? 0.15 : 0) : 0;
+  const shifted = Math.abs(tauFast - tauMMin) > 0.5 || phi > 0 || extra > 0;
+  const weight = shifted ? Math.max(classWeight, phiMacro > 0 || stretch > 0 || extra > 0 ? W.macros : 0, fiber ? 0.15 : 0) : 0;
+  // Extra appearance needs a delay to follow; with no delayed fraction the delayed kernel still starts after the minimum delay.
+  const delayOut = extra > 0 && delay === 0 ? clamp(P.deltaPerFatMin * (fat ?? 0), P.deltaMinWhenDelayedMin, P.deltaMaxMin) : delay;
   return {
     version: ABSORPTION_VERSION,
     tauFastMin: tauFast,
     phi,
-    delayMin: delay,
+    delayMin: delayOut,
     tauSlowMin: P.tauSlowMin,
     source: sources.length === 0 ? 'default' : sources.join('+'),
     uncertaintyWeight: weight,
+    ...(extra > 0 ? { extraEquivalentG: extra } : {}),
   };
 }
 
@@ -148,6 +167,7 @@ export function assertValidProfile(p: AbsorptionProfile): void {
     Number.isFinite(p.phi) && p.phi >= 0 && p.phi <= P.phiMax &&
     Number.isFinite(p.delayMin) && p.delayMin >= 0 && p.delayMin <= P.deltaMaxMin &&
     Number.isFinite(p.tauSlowMin) && p.tauSlowMin > 0 && (p.phi === 0 || p.delayMin >= P.deltaMinWhenDelayedMin) &&
-    p.uncertaintyWeight >= 0 && p.uncertaintyWeight <= 1;
+    p.uncertaintyWeight >= 0 && p.uncertaintyWeight <= 1 &&
+    (p.extraEquivalentG === undefined || (Number.isFinite(p.extraEquivalentG) && p.extraEquivalentG >= 0 && p.extraEquivalentG <= P.equivalentMaxG));
   if (!ok) throw new RangeError('absorption profile outside its documented bounds: ' + JSON.stringify(p));
 }

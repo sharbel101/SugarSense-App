@@ -10,8 +10,8 @@ import type { EngineParams, TimeClass } from './types.js';
 
 /** Incumbent: every meal absorbs as ONE gamma(2) component (tau = tauM x the person's speed class). */
 export const ENGINE_LAYER_VERSION = 'meal-aware-0.1';
-/** Candidate: meals absorb with the early/delayed absorption profile of absorption.ts (class, GI as weak evidence, fat, protein, fibre). */
-export const ABSORPTION_LAYER_VERSION = 'meal-aware-0.2';
+/** Candidate (0.2 was the first absorption profile, 0.3 strengthens the fibre effect): meals absorb with the early/delayed absorption profile of absorption.ts (class, GI as weak evidence, fat, protein, fibre). */
+export const ABSORPTION_LAYER_VERSION = 'meal-aware-0.3';
 /** Stored model_version of a SHADOW forecast contains this marker; shadow rows are never used for learning, evidence or display. */
 export const SHADOW_MARKER = '-shadow';
 

@@ -124,8 +124,15 @@ export function computeEventLayer(input: LayerInput): EventLayerResult {
           const spread = Math.abs(incAt(age0 + meal.timingUncertaintyMin, j) - incAt(age0 - meal.timingUncertaintyMin, j)) / 2;
           varTiming[j] = (varTiming[j] as number) + (params.mCsf * spread) ** 2;
         }
+        const extraG = meal.absorption?.extraEquivalentG ?? 0;
+        if (meal.absorption && extraG > 0) {
+          // The extra amplitude is itself an estimate: treat it as uncertain by half of its size.
+          const { delayMin, tauSlowMin } = meal.absorption;
+          const dX = mealCumulativeAbsorption(age0 + (minutes[j] as number) - delayMin, tauSlowMin) - mealCumulativeAbsorption(age0 - delayMin, tauSlowMin);
+          varFp[j] = (varFp[j] as number) + (0.5 * csf * extraG * dX) ** 2;
+        }
         const fpMax = FAT_PROTEIN.alphaPMax * (meal.proteinG ?? 0) + FAT_PROTEIN.alphaFMax * (meal.fatG ?? 0);
-        if (fpMax > 0) {
+        if (fpMax > 0 && !(meal.absorption && extraG > 0)) {
           const dF = delayedIncrement(age0, minutes[j] as number);
           varFp[j] = (varFp[j] as number) + (FAT_PROTEIN.amplitudeSdFactor * csf * fpMax * dF) ** 2;
         }
@@ -288,6 +295,12 @@ function mealF(meal: MealInput, sMin: number, params: EngineParams): number {
 /** Glucose increment (mg/dL, unscaled) of one meal over [age, age + h]. */
 function mealIncrement(meal: MealInput, csf: number, ageMin: number, hMin: number, params: EngineParams): number {
   const main = csf * (meal.carbsG as number) * (mealF(meal, ageMin + hMin, params) - mealF(meal, ageMin, params));
+  const profileExtra = meal.absorption?.extraEquivalentG ?? 0;
+  if (meal.absorption && profileExtra > 0) {
+    // Extra late glucose from fat/protein (carbohydrate-equivalent grams), timed like the delayed component of the profile.
+    const { delayMin, tauSlowMin } = meal.absorption;
+    return main + csf * profileExtra * (mealCumulativeAbsorption(ageMin + hMin - delayMin, tauSlowMin) - mealCumulativeAbsorption(ageMin - delayMin, tauSlowMin));
+  }
   const eq = params.alphaP * (meal.proteinG ?? 0) + params.alphaF * (meal.fatG ?? 0);
   // The project spec's optional extra delayed amplitude (alphaP / alphaF, default 0) and the mass-conserving delayed fraction of an
   // absorption profile describe the same physiology; never apply both to one meal.

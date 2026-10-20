@@ -180,10 +180,51 @@ describe('absorption profile - how the evidence chooses it', () => {
     expect(resolve({ fatG: 20, proteinG: 25 }).phi).toBeLessThan(0.1);
   });
 
-  it('fibre slows the early component slightly, capped', () => {
+  it('fibre slows the early component (0.05 per gram, capped at 15 g = +75%)', () => {
     expect(resolve({ fiberG: 0 }).tauFastMin).toBe(TAU_M);
-    expect(resolve({ fiberG: 10 }).tauFastMin).toBeCloseTo(TAU_M * 1.1, 9);
-    expect(resolve({ fiberG: 500 }).tauFastMin).toBeCloseTo(TAU_M * 1.15, 9);
+    expect(resolve({ fiberG: 10 }).tauFastMin).toBeCloseTo(TAU_M * 1.5, 9);
+    expect(resolve({ fiberG: 15 }).tauFastMin).toBeCloseTo(TAU_M * 1.75, 9);
+    expect(resolve({ fiberG: 500 }).tauFastMin).toBeCloseTo(TAU_M * 1.75, 9);
+    expect(resolve({ fiberG: 500 }).tauFastMin).toBeLessThanOrEqual(ABSORPTION_PARAMS.tauFastBoundsMin.max);
+    // slower appearance moves carbohydrate later without adding any: the total is unchanged
+    expect(profileCumulative(6000, resolve({ fiberG: 15 }))).toBeCloseTo(1, 9);
+  });
+
+  it('the fat/protein "stretch" and "extra equivalent" terms are OFF by default: profiles carry no extra amount and match their previous values', () => {
+    const p = resolve({ fatG: 60, proteinG: 40 });
+    expect(p.extraEquivalentG).toBeUndefined();
+    expect(p.tauFastMin).toBe(TAU_M);
+    expect(ABSORPTION_PARAMS.stretchPerFatG).toBe(0);
+    expect(ABSORPTION_PARAMS.equivalentPerFatG).toBe(0);
+  });
+
+  it('when enabled, the extra equivalent ADDS late glucose (not only moves it), follows the delayed kernel, and is bounded', () => {
+    const P = ABSORPTION_PARAMS as unknown as Record<string, number>;
+    const saved = { s: P.stretchPerFatG, e: P.equivalentPerFatG, ep: P.equivalentPerProteinG };
+    try {
+      P.equivalentPerFatG = 0.5;
+      P.equivalentPerProteinG = 0.25;
+      const p = resolve({ fatG: 55, proteinG: 40 });
+      expect(p.extraEquivalentG).toBeCloseTo(0.5 * 40 + 0.25 * 20, 9);
+      assertValidProfile(p);
+      const withExtra = run(meal(p, { fatG: 55, proteinG: 40 }));
+      const without = run(meal({ ...p, extraEquivalentG: undefined }, { fatG: 55, proteinG: 40 }));
+      expect(at(withExtra, 30)).toBeCloseTo(at(without, 30), 6); // nothing before the delay
+      expect(at(withExtra, 180)).toBeGreaterThan(at(without, 180) + 5); // glucose is added later
+      const csf = 50 / 10;
+      const added = csf * (p.extraEquivalentG as number) * mealCumulativeAbsorption(180 - p.delayMin, p.tauSlowMin);
+      expect(at(withExtra, 180) - at(without, 180)).toBeCloseTo(added, 6);
+      // the carbohydrate itself is still conserved
+      expect(profileCumulative(6000, p)).toBeCloseTo(1, 9);
+      // the bound holds for absurd macros
+      P.equivalentPerFatG = 100;
+      expect(resolve({ fatG: 300, proteinG: 300 }).extraEquivalentG).toBe(ABSORPTION_PARAMS.equivalentMaxG);
+      assertValidProfile(resolve({ fatG: 300, proteinG: 300 }));
+    } finally {
+      P.stretchPerFatG = saved.s;
+      P.equivalentPerFatG = saved.e;
+      P.equivalentPerProteinG = saved.ep;
+    }
   });
 
   it('every valid input combination yields an in-bounds profile and finite curves (no NaN, no infinity)', () => {
