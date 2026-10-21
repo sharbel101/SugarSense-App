@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-ENGINE_VERSION = "insights-0.2.2"
+ENGINE_VERSION = "insights-0.2.3"
 PROMPT_VERSION = "insight-write-v2"
 SCHEMA_VERSION = "insight-write-v2"
 
@@ -77,7 +77,7 @@ class Thresholds:
 @dataclass(frozen=True)
 class LlmConfig:
     url: str = "http://127.0.0.1:8181"
-    timeout_s: int = 240          # existing benchmark: ~2 min for 590 tokens; with ~150 tokens expect well under this
+    timeout_s: int = 600          # a batch of five cards is about 7 minutes on the 4-CPU VM (about 7 tokens/s); the unit allows 20 minutes in total
     max_tokens_per_insight: int = 560     # front paragraph + the reasoning and safety texts for the back of the card
     max_tokens_cap: int = 2000
     temperature: float = 0.7              # writing, not classifying: sampled so the wording differs from day to day (the facts never do)
