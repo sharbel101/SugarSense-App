@@ -19,7 +19,8 @@
 //   * one recovery retry (back, home, relaunch) when the reading is not found
 // ---------------------------------------------------------------------------
 
-var AGENT_VERSION = "v3-2026-10-17";
+var AGENT_VERSION = "v3.3-2026-10-21";
+var FAIL_LOG_PATH = "/sdcard/Download/glucose_fail.log";
 
 var DEFAULT_PRIMARY = "";  // set "endpoint" in glucose_config.json on the phone (quick-tunnel URL kept out of the public repo)
 var DEFAULT_FALLBACK = "https://entitle-evacuate-removed.ngrok-free.dev";
@@ -42,6 +43,11 @@ var HTTP_TIMEOUT_MS = 10 * 1000;
 var MAX_PENDING = 40;
 var REPORT_MIN_GAP_MS = 5 * 60 * 1000; // per event type
 var STALE_REPORT_AGE_MIN = 15;         // report "iCan Reach data is N min old" from here on
+// iCan Reach only fetches fresh data when its list is pulled down, so every scrape drags the screen down
+// and waits for the refresh to finish before reading. Disable/tune in glucose_config.json:
+//   "pullToRefresh": false      "refreshWaitSeconds": 5
+var PULL_TO_REFRESH = true;
+var REFRESH_WAIT_MS = 5 * 1000;
 
 // --- single-instance guard (lock file) --------------------------------------
 var MY_ID = Date.now() + "-" + Math.floor(Math.random() * 1e6);
@@ -85,6 +91,8 @@ function readJson(path) {
 }
 function loadConfig() {
     var c = readJson(CONFIG_PATH) || {};
+    if (c.pullToRefresh === false) PULL_TO_REFRESH = false;
+    if (c.refreshWaitSeconds > 0 && c.refreshWaitSeconds <= 30) REFRESH_WAIT_MS = c.refreshWaitSeconds * 1000;
     var primaries = [];
     function addPrimary(u) {
         var b = baseOf(u);
@@ -256,6 +264,7 @@ function parseReading(descStr) {
     var desc = descStr;
     var unit = /mmol\/l/i.test(desc) ? "mmol/L" : "mg/dL";
     var ageMinutes = null;
+    var ageCoarse = false;     // "N hours ago" only says the hour: the true time is unknown (+-60 min)
     var whole = desc.toLowerCase();
     if (/just now|<\s*1\s*min|moments? ago/.test(whole)) {
         ageMinutes = 0;
@@ -263,9 +272,9 @@ function parseReading(descStr) {
         var mm = whole.match(/(\d+)\s*(?:min|mins|minute|minutes)\b/);
         var hh = whole.match(/(\d+)\s*(?:h|hr|hrs|hour|hours)\b/);
         if (mm) ageMinutes = parseInt(mm[1], 10);
-        else if (hh) ageMinutes = parseInt(hh[1], 10) * 60;
+        else if (hh) { ageMinutes = parseInt(hh[1], 10) * 60; ageCoarse = true; }
     }
-    return { value: value, unit: unit, ageMinutes: ageMinutes, raw: desc };
+    return { value: value, unit: unit, ageMinutes: ageMinutes, ageCoarse: ageCoarse, raw: desc };
 }
 
 var DISMISS_RE = "(?i)^\\s*(I See|Remind me later|OK|Okay|Got it|I Know|I Understand|Understood|Confirm|Done|知道了|我知道了|确定|好的)\\s*$";
@@ -350,12 +359,46 @@ function postReading(reading, fetchId) {
 }
 
 // --- one scrape ---------------------------------------------------------------
+// Drag the list down from 29% to 71% of the screen height (the gesture that shows the app's
+// "Refreshing in progress..." spinner), then wait for it to finish.
+function pullToRefresh() {
+    try {
+        var x = device.width / 2;
+        swipe(x, device.height * 0.29, x, device.height * 0.71, 450);
+        log("pull-to-refresh, waiting " + (REFRESH_WAIT_MS / 1000) + "s");
+    } catch (e) {
+        log("pull-to-refresh failed (reading anyway): " + e);
+    }
+    sleep(REFRESH_WAIT_MS);
+}
+
+// What was on screen when the reading could not be found (small, only written on failure), so the next failure explains itself.
+function dumpScreen(tag) {
+    try {
+        if (files.exists(FAIL_LOG_PATH) && files.read(FAIL_LOG_PATH).length > 200000) files.write(FAIL_LOG_PATH, "");
+        var seen = [];
+        var nodes = descMatches("(?s).+").find();
+        for (var i = 0; i < nodes.length && seen.length < 30; i++) seen.push("d:" + String(nodes[i].desc()).replace(/\s+/g, " ").substring(0, 70));
+        var tn = textMatches("(?s).+").find();
+        for (var j = 0; j < tn.length && seen.length < 45; j++) seen.push("t:" + String(tn[j].text()).replace(/\s+/g, " ").substring(0, 70));
+        files.append(FAIL_LOG_PATH, new Date().toISOString() + " " + tag + " pkg=" + currentPackage() + " screenOn=" + device.isScreenOn() + " nodes=" + JSON.stringify(seen) + "\n");
+    } catch (e) {
+        log("dumpScreen failed: " + e);
+    }
+}
+
 function openAndRead() {
     app.launchPackage(ICAN_PKG);
     sleep(5000);
     var closed = clearAllDialogs();
     log(closed > 0 ? ("cleared " + closed + " dialog(s)") : "no dialog");
     sleep(closed > 0 ? 3000 : 1000);
+    if (PULL_TO_REFRESH) {
+        pullToRefresh();
+        // the refresh can raise a fresh alert popup on top of the reading card
+        var closed2 = clearAllDialogs();
+        if (closed2 > 0) { log("cleared " + closed2 + " dialog(s) after refresh"); sleep(2000); }
+    }
     return readGlucose();
 }
 
@@ -377,6 +420,15 @@ function syncOnce(fetchId) {
         reading = openAndRead();
     }
     if (!reading) {
+        // last resort: the pull-to-refresh itself can leave the card unreadable for a while, so read the app as it is, without pulling
+        dumpScreen("retry-failed");
+        log("glucose node not found after retry - reading without pull-to-refresh");
+        try { app.launchPackage(ICAN_PKG); sleep(8000); clearAllDialogs(); } catch (e) {}
+        reading = readGlucose();
+        if (reading) log("read without pull-to-refresh worked");
+    }
+    if (!reading) {
+        dumpScreen("final-failed");
         log("glucose node not found after retry");
         report("scrape_failed", "reading not found on screen after recovery retry");
         home();
@@ -384,6 +436,14 @@ function syncOnce(fetchId) {
     }
     if (reading.ageMinutes !== null && reading.ageMinutes >= STALE_REPORT_AGE_MIN) {
         report("source_stale", "iCan Reach shows data " + reading.ageMinutes + " min old (sensor/primary phone side)");
+    }
+    if (reading.ageCoarse) {
+        // An hour-level label ("1 hours ago") cannot give the reading's real time. Posting it would stamp the
+        // same stale value at now-60min / now-120min: a made-up timestamp. The reading was already stored when
+        // it was fresh, so skip it and let the server show the honest gap.
+        log("age is hour-level (" + reading.ageMinutes + "m): not posting a guessed timestamp");
+        home();
+        return true;
     }
     postReading(reading, fetchId);
     home();
