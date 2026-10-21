@@ -1,0 +1,18 @@
+# Add inside BOTH server blocks of /etc/nginx/sites-available/sugarsense-gateway (:80, reached via ngrok) and sugarsense-web (:8090, via the
+# Cloudflare tunnel), ABOVE their catch-all "location /". Back the files up first; then: sudo nginx -t && sudo systemctl reload nginx
+#
+# TLS: this VM has no certificate of its own; ngrok / Cloudflare terminate TLS and send X-Forwarded-Proto: https. The check below refuses anything that
+# did not arrive that way (for example plain http straight to the VM's public IP), so the token never travels in clear text.
+location /api/garmin/ {
+    if ($http_x_forwarded_proto != "https") { return 403; }
+    proxy_pass http://127.0.0.1:8310;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_read_timeout 15s;
+    proxy_send_timeout 15s;
+    client_max_body_size 4k;
+    proxy_buffering on;
+    proxy_max_temp_file_size 0;
+    limit_except GET { deny all; }
+}

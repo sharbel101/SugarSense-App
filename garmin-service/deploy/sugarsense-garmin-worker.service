@@ -1,0 +1,19 @@
+[Unit]
+Description=SugarSense Garmin poller (rate-limited, read-only, never signs in)
+After=network-online.target postgresql@16-main.service
+StartLimitIntervalSec=900
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/garmin-mcp
+EnvironmentFile=/home/ubuntu/garmin-mcp/service.env
+ExecStart=/home/ubuntu/garmin-mcp/venv/bin/python -m gsvc.cli run-worker
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/garmin-mcp/state /home/ubuntu/garmin-mcp/oauth /home/ubuntu/garmin-mcp

@@ -1,0 +1,16 @@
+[Unit]
+Description=SugarSense Garmin metrics API (read-only, localhost only)
+After=network.target postgresql@16-main.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/garmin-mcp
+EnvironmentFile=/home/ubuntu/garmin-mcp/service.env
+ExecStart=/home/ubuntu/garmin-mcp/venv/bin/python -m gsvc.api
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only

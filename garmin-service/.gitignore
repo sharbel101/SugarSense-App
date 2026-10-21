@@ -1,0 +1,11 @@
+# secrets and runtime state: never commit
+connector.env
+.env
+data/
+state/
+venv/
+__pycache__/
+.pytest_cache/
+*.log
+oauth/
+NEEDS_LOGIN
