@@ -24,7 +24,9 @@ Backend status (2026-10-21): the route is implemented and verified end to end ag
     "id": "uuid", "category": "episode_digest", "headline": "Time outside your range", "trigger": "evening",   // morning | evening | event
     "priority": 5.6, "createdAt": "...Z", "expiresAt": "...Z" /* or null */, "observationStart": "...Z", "observationEnd": "...Z",
     "factsText": ["Today so far: 3 stay(s) above 180 mg/dL [E2] totalling about 185 minutes [E3], ..."],     // AUTHORITATIVE, 1+ sentences
-    "explanation": "Glucose stayed above range three times." /* or null */,                                 // optional plain-language gloss
+    "paragraph": "One good paragraph for the FRONT of the card.", "source": "ai",                              // ai | rules
+    "reasoning": "How this was reasoned...", "safety": "What this cannot tell you...",                         // BACK of the card
+    "explanation": "Same text as reasoning (kept field)" /* or null */,                                      // BACK of the card
     "limitations": ["Time without readings is unknown, not assumed in range."],                              // may be empty
     "validation": "valid",                                                                                    // valid | fallback | not_applicable
     "evidenceRefs": ["E2"],
@@ -54,9 +56,8 @@ Full contract and rules: `backend/src/insights/README.md`. Insights arrive alrea
 
 Keep the existing header ("Insights", avatar) and subtitle. Under it, in the order received, one `Card` per insight:
 1. **Headline** (title) with a small category icon (use existing `Icon` names; pick neutral ones; an unknown category gets the generic sparkle icon already used).
-2. **`factsText`** as the main body, one paragraph per sentence group. This is the source of truth: show it verbatim (tags stripped).
-3. **`explanation`** (only if not null) as a quieter second block labelled "In plain words". It never replaces the facts. If `validation` is `fallback`, there is simply no explanation block: do not show a badge or an error.
-4. **`limitations`** (if any) as small secondary text under "What this can't tell you", always visible, not collapsed.
+2. **FRONT of the card: `paragraph` only** (one paragraph, no extra blocks, no "In plain words", no "What this can't tell you"). `source` is `ai` or `rules`; show both the same way, no badge. Older rows without a paragraph already arrive with `paragraph` filled in.
+3. **BACK of the card (shown when the card is pressed and flips)**, the same fields as before, now meaning: **`factsText`** = the evidence (verbatim, tags stripped); **`explanation`** (= `reasoning`, same text) = how the insight was reached and where it came from; **`limitations`** = the safety text first (`safety` is the same as `limitations[0]` when present), then the data limits. `explanation` can be null on old rows: skip that block.
 5. A meta line: trigger label ("Morning briefing", "Evening recap", "Just now" for `event`) and the time in the user's local time.
 - At the bottom, once, the response's **`notice`** text.
 - `data_availability` and `data_quality` cards use a neutral style (no red, no alarm iconography). Anything about lows (text mentions "below 70") is a *past episode summary*: do not style it as an alert.
@@ -69,7 +70,7 @@ Keep the existing header ("Insights", avatar) and subtitle. Under it, in the ord
 
 Do not compute, round, convert or reword any number: display `factsText` as received. Do not add statistics, charts of your own, scores, "good/bad day" labels, trends or predictions. Do not call a model. Do not turn an insight into a notification
 or an alert (alerts are a separate system with their own budget). Do not suggest doses, food or insulin timing. mg/dL only. Do not use "accurate", "optimal", "clinically validated". Do not add mock insights to the shipped app.
-A missing explanation, limitations or evidence is fine; a missing `factsText` means the insight is dropped.
+A missing explanation, limitations or evidence is fine; a missing `factsText` or `paragraph` means the insight is dropped.
 
 ## 6. Tests and verification (show real output)
 

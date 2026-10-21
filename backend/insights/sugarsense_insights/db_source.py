@@ -58,4 +58,13 @@ class PgSource:
             fc = [ForecastPoint(r[0], int(r[1]), r[2], float(r[3]), float(r[4]), float(r[5]), float(r[6])) for r in c.execute(
                 """SELECT anchor_at, horizon_min, target_at, predicted_mgdl, lower_mgdl, upper_mgdl, interval_level FROM predictions
                    WHERE user_id=%s AND anchor_at = (SELECT max(anchor_at) FROM predictions WHERE user_id=%s) ORDER BY horizon_min""", (user_id, user_id)).fetchall()]
-        return Snapshot(settings, now, readings, meals, insulin, acts, sleeps, wear, fc)
+            therapy: dict[str, Any] = {}
+            try:   # the person's own latest therapy settings; missing table/column or no row = unknown (empty), never a guess
+                tp = c.execute(
+                    "SELECT morning_resistance FROM therapy_profiles WHERE user_id=%s AND effective_from <= %s ORDER BY effective_from DESC, version DESC LIMIT 1",
+                    (user_id, now)).fetchone()
+                if tp is not None:
+                    therapy["morning_resistance"] = bool(tp[0])
+            except Exception:
+                therapy = {}
+        return Snapshot(settings, now, readings, meals, insulin, acts, sleeps, wear, fc, therapy)

@@ -55,7 +55,7 @@ class GlucoseOnly(unittest.TestCase):
         cands, _ = build_candidates("evening", snap, clean, flags, assess(snap, clean, flags))
         digest = next(c for c in cands if c.category == "episode_digest")
         p = candidate_payload(digest, "I1")
-        self.assertEqual(set(p), {"insight_id", "category", "claims", "refs", "boundaries", "limitations"})
+        self.assertEqual(set(p), {"insight_id", "category", "claims", "refs", "boundaries", "limitations", "possible_explanations", "possible_next_steps"})
         self.assertLess(len(json.dumps(p)), 1800)
         self.assertNotRegex(json.dumps(p), r"readings\"?: ?\[")
 
@@ -109,7 +109,7 @@ class TimePattern(unittest.TestCase):
         self.assertIsNotNone(c)
         self.assertRegex(c.claims[0], r"A stay above range began between \d\d:00 and \d\d:00 on \d+ of \d+ days")
         self.assertTrue(any("not an established pattern" in l for l in c.limitations))
-        self.assertTrue(any("Do not name a cause" in b for b in c.boundaries))
+        self.assertTrue(any("Possibilities only" in b for b in c.boundaries))
 
     def test_flat_glucose_has_no_time_pattern(self):
         snap = snapshot(EVENING, readings=cgm(6, EVENING, curve=lambda lm: 120.0))

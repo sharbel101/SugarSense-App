@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-ENGINE_VERSION = "insights-0.1.0"
-PROMPT_VERSION = "insight-explain-v1"
-SCHEMA_VERSION = "insight-explain-v1"
+ENGINE_VERSION = "insights-0.2.0"
+PROMPT_VERSION = "insight-write-v2"
+SCHEMA_VERSION = "insight-write-v2"
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,12 @@ class Thresholds:
     baseline_tir_points: float = 10.0    # time-in-range must move by 10 percentage points to count as different from usual
     event_excursion_margin_mgdl: float = 40.0  # an event insight for a high needs a peak at least this far above the high threshold
     min_abs_r: float = 0.5               # |Pearson r| needed before an association between two series is reported at all
+    # --- reasoning evidence: what the model is allowed to reason about is limited to what these produce ------------------------------------
+    big_spike_rise_mgdl: float = 60.0    # a post-meal rise this large (about half the 70-180 range) opens the "big meal spike" reasoning; smaller rises stay a plain report
+    fasting_hours: int = 4               # no meal and no insulin record in the 4 h before a high = unexplained by the records (a meal is mostly absorbed within 3-4 h)
+    dose_context_min: int = 60           # a bolus within +-60 min of a meal is treated as that meal's dose when looking at timing
+    post_activity_hours: int = 12        # a low starting within 12 h after activity ended can be linked to it (the effect on sensitivity lasts hours)
+    low_after_dose_hours: int = 5        # a low 1-5 h after a bolus or correction is inside the insulin action window (about 5 h)
     activity_window_min: int = 120
     min_pairs_association: int = 7       # sleep/exercise associations need 7 paired observations; below that it is anecdote
     # --- scheduling / lifecycle -------------------------------------------------------------------------------------
@@ -72,11 +78,11 @@ class Thresholds:
 class LlmConfig:
     url: str = "http://127.0.0.1:8181"
     timeout_s: int = 240          # existing benchmark: ~2 min for 590 tokens; with ~150 tokens expect well under this
-    max_tokens_per_insight: int = 170
-    max_tokens_cap: int = 900
-    temperature: float = 0.0
+    max_tokens_per_insight: int = 560     # front paragraph + the reasoning and safety texts for the back of the card
+    max_tokens_cap: int = 2000
+    temperature: float = 0.7              # writing, not classifying: sampled so the wording differs from day to day (the facts never do)
     batch: bool = True
-    seed: int = 1
+    seed: int | None = None               # no fixed seed: variety is wanted; correctness is enforced by the validator, not by determinism
 
 
 @dataclass(frozen=True)

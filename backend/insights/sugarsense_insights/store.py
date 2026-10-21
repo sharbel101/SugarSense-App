@@ -47,7 +47,7 @@ class InMemoryStore:
                 r.update(status=status, stats=stats, finished_at=now)
 
     def history(self, user_id, since):
-        return [dict(i, insight_id=iid) for iid, i in self.insights.items() if i["user_id"] == user_id and i["created_at"] >= since]
+        return [dict(i, insight_id=iid, paragraph=(i.get("content") or {}).get("paragraph")) for iid, i in self.insights.items() if i["user_id"] == user_id and i["created_at"] >= since]
 
     def save_insight(self, user_id, run_id, rec):
         iid = str(uuid.uuid4())
@@ -96,10 +96,10 @@ class PgStore:
     def history(self, user_id, since):
         with self._conn() as c:
             rows = c.execute(
-                """SELECT insight_id::text, dedupe_key, category, trigger, facts_hash, content_version, created_at, status, evidence
+                """SELECT insight_id::text, dedupe_key, category, trigger, facts_hash, content_version, created_at, status, evidence, content->>'paragraph'
                    FROM insights WHERE user_id=%s AND created_at >= %s""", (user_id, since)).fetchall()
         return [{"insight_id": r[0], "dedupe_key": r[1], "category": r[2], "trigger": r[3], "facts_hash": r[4], "content_version": r[5],
-                 "created_at": r[6], "status": r[7], "evidence_facts": [[f["name"], f["value"], f["unit"]] for f in (r[8] or {}).get("facts", [])]} for r in rows]
+                 "created_at": r[6], "status": r[7], "evidence_facts": [[f["name"], f["value"], f["unit"]] for f in (r[8] or {}).get("facts", [])], "paragraph": r[9]} for r in rows]
 
     def save_insight(self, user_id, run_id, rec):
         with self._conn() as c:

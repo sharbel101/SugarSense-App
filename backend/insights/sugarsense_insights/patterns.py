@@ -12,6 +12,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from . import features as F
+from . import menus as M
 from .models import Candidate, Fact, Snapshot, Reading
 from .quality import Availability, Flag, coverage, in_window
 
@@ -374,6 +375,7 @@ def meal_responses(snap: Snapshot, clean: list[Reading], start: datetime, end: d
         if rise < th.meal_response_min_rise_mgdl:
             continue
         near_ins = [i for i in snap.insulin if abs((i.t - m.t).total_seconds()) <= 1800 and i.units is not None]
+        doses_near = [i for i in snap.insulin if i.kind in ("bolus", "correction") and abs((i.t - m.t).total_seconds()) <= th.dose_context_min * 60]
         b = _B()
         e1 = b.add("meal_estimated_carbs", _r(m.carbs_g), "g", "context")
         e2 = b.add("glucose_at_meal", _r(base.mgdl), "mg/dL", "measured")
@@ -382,17 +384,55 @@ def meal_responses(snap: Snapshot, clean: list[Reading], start: datetime, end: d
         e5 = b.add("minutes_to_peak", _r((peak.t - m.t).total_seconds() / 60), "min")
         claims = [f"After the meal logged at {_hm(m.t, tz)} (about {_r(m.carbs_g)} g estimated carbohydrates [{e1}]), glucose rose from {_r(base.mgdl)} mg/dL [{e2}] to a peak of {_r(peak.mgdl)} mg/dL [{e3}], {_r(rise)} mg/dL higher [{e4}], {_r((peak.t - m.t).total_seconds() / 60)} minutes later [{e5}]."]
         lim = []
-        if near_ins:
+        offset = None   # minutes from the meal to its dose; negative = the dose was logged BEFORE the meal
+        if doses_near:
+            dn = min(doses_near, key=lambda i: abs((i.t - m.t).total_seconds()))
+            offset = (dn.t - m.t).total_seconds() / 60
+            mins = _r(abs(offset))
+            if offset < -1:
+                claims.append(f"An insulin dose was logged {mins} minutes before the meal [{b.add('dose_minutes_before_meal', mins, 'min', 'context')}].")
+            elif offset > 1:
+                claims.append(f"An insulin dose was logged {mins} minutes after the meal [{b.add('dose_minutes_after_meal', mins, 'min', 'context')}].")
+            else:
+                claims.append(f"An insulin dose was logged at about the same time as the meal [{b.add('dose_at_meal', 0, 'min', 'context')}].")
+        elif near_ins:
             e6 = b.add("insulin_records_near_meal", len(near_ins), "count", "context")
             claims.append(f"{len(near_ins)} insulin record(s) exist within 30 minutes of the meal [{e6}]; they affect this response, so no conclusion is drawn about dosing.")
         else:
             lim.append("No insulin record with a dose exists near this meal, so insulin is not part of this explanation.")
+        expl: list = []
+        sugg: list = []
+        if rise >= th.big_spike_rise_mgdl:
+            # similar-time meals on other days that also rose sharply
+            tm = m.t.astimezone(tz).hour * 60 + m.t.astimezone(tz).minute
+            k = n = 0
+            for o in snap.meals:
+                if o.id == m.id or o.status not in ("confirmed", "manual_entry") or o.carbs_g is None:
+                    continue
+                om = o.t.astimezone(tz).hour * 60 + o.t.astimezone(tz).minute
+                if abs(om - tm) > 90 or o.t + timedelta(minutes=th.meal_window_min) > snap.now:
+                    continue
+                ow0, ow1 = o.t - timedelta(minutes=th.meal_pre_min), o.t + timedelta(minutes=th.meal_window_min)
+                if coverage(clean, ow0, ow1, th) < th.min_cov_meal:
+                    continue
+                ob = F.nearest([r for r in clean if r.t <= o.t], o.t, th.meal_pre_min)
+                oa = [r for r in clean if o.t < r.t <= ow1]
+                if ob is None or not oa:
+                    continue
+                n += 1
+                k += 1 if max(r.mgdl for r in oa) - ob.mgdl >= th.big_spike_rise_mgdl else 0
+            if n >= 3 and k >= 2:
+                claims.append(f"{k} of {n} other meals at a similar time of day also rose by at least {_r(th.big_spike_rise_mgdl)} mg/dL [{b.add('similar_meals_big_rise', k, 'count')}, {b.add('similar_meals_checked', n, 'count')}, {b.add('big_rise_threshold', _r(th.big_spike_rise_mgdl), 'mg/dL', 'context')}].")
+            # earlier-mealtime-insulin talk is only offered when a dose was logged at or after the start of the meal;
+            # if it was logged earlier (or nothing is logged near the meal) timing is not the story
+            expl, sugg = M.BIG_MEAL_SPIKE if (offset is not None and offset >= -5) else M.BIG_MEAL_SPIKE_DOSE_ALREADY_EARLY
         out.append(Candidate(
             key=f"meal:{m.id}", category="meal_response", trigger=trigger, window=(m.t, w1), facts=b.facts, claims=claims,  # type: ignore[arg-type]
-            boundaries=[NOT_ADVICE, ASSOC, "Carbohydrates are an estimate."], limitations=lim, coverage=coverage(clean, w0, w1, th),
+            boundaries=[NOT_ADVICE, ASSOC, "Carbohydrates are an estimate."] + (["Possibilities only. Never state a dose, units or an exact number of minutes to wait."] if expl else []),
+            limitations=lim, coverage=coverage(clean, w0, w1, th),
             method="glucose at the meal vs the highest reading in the following 3 hours", direction="rising",
-            untrusted=[m.note] if m.note else [],
-            scores={"safety": 0.4, "evidence": 0.8, "recurrence": 0.0, "relevance": 0.9, "actionability": 0.5},
+            untrusted=[m.note] if m.note else [], explanations=list(expl), suggestions=list(sugg),
+            scores={"safety": 0.4, "evidence": 0.8, "recurrence": 0.0, "relevance": 0.9 + (0.1 if expl else 0.0), "actionability": 0.5 + (0.4 if sugg else 0.0)},
         ))
     out.sort(key=lambda c: -c.facts[3].value)
     return out[:2]

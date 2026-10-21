@@ -62,6 +62,9 @@ def decide(candidates: list[Candidate], history: list[dict[str, Any]], now: date
         seen_keys.add(c.key)
         same = sorted([h for h in history if h["dedupe_key"] == c.key], key=lambda h: h["content_version"])
         last = same[-1] if same else None
+        if last and "paragraph" in last and not last["paragraph"] and last["status"] == "active":
+            out.append(Decision(c, "supersede", last["insight_id"], last["content_version"] + 1))   # stored in the older multi-block format: rewrite it as one paragraph
+            continue
         if last and last["facts_hash"] == c.facts_hash and last["status"] in ("active", "superseded"):
             out.append(Decision(c, "drop_duplicate"))
             continue

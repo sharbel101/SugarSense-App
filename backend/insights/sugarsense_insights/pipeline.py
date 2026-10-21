@@ -5,6 +5,7 @@ run still completes. Nothing here reads or writes alert, forecast, glucose or tr
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections import Counter
@@ -14,6 +15,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from . import episodes as E
+from . import reasoning as R
 from . import patterns as P
 from .config import ENGINE_VERSION, PROMPT_VERSION, Weights
 from .llm import Explainer, candidate_payload
@@ -74,6 +76,9 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
             if not c:
                 why["episodes"] = [f"readings covered less than {int(th.min_cov_episode * 100)}% of last night and of yesterday, or too few readings"]
             add(E.episode_context(snap, clean, flags, ys, snap.now, "morning"))
+            add(R.unexplained_high(snap, clean, flags, ys, snap.now, "morning"))
+            add(R.low_after_dose(snap, clean, flags, ys, snap.now, "morning"))
+            add(R.post_activity_low(snap, clean, flags, ys, snap.now, "morning"))
             add(P.previous_day_context(snap, d))
             add(P.forecast_outlook(snap, clean))
             if not av["forecast"].ok:
@@ -85,6 +90,9 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
             if not c:
                 why["episodes"] = [f"today's readings covered less than {int(th.min_cov_episode * 100)}% of the day so far, or too few readings"]
             add(E.episode_context(snap, clean, flags, s, min(e, snap.now), "evening"))
+            add(R.unexplained_high(snap, clean, flags, s, min(e, snap.now), "evening"))
+            add(R.low_after_dose(snap, clean, flags, s, min(e, snap.now), "evening"))
+            add(R.post_activity_low(snap, clean, flags, s, min(e, snap.now), "evening"))
             add(P.meal_responses(snap, clean, s, min(e, snap.now), "evening"))
             add(P.meal_response_recurring(snap, clean, d))
             add(P.exercise_association(snap, clean))
@@ -127,14 +135,67 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
         recent_cut = snap.now - timedelta(minutes=60)
         c[:] = [x for x in c if x.window[1] >= recent_cut]   # only stays that are ongoing or just ended
         add(P.meal_responses(snap, clean, snap.now - timedelta(hours=4), snap.now - timedelta(minutes=th.meal_window_min * 0.66), "event"))
+        add(R.unexplained_high(snap, clean, flags, snap.now - timedelta(hours=3), snap.now, "event"))
+        # an unexplained high replaces the plain excursion for the same stay (one card per stay)
+        starts = {x.window[0] for x in c if x.category == "unexplained_high"}
+        c[:] = [x for x in c if not (x.category == "glucose_excursion" and x.window[0] in starts)]
         add(P.data_quality(snap, clean, flags, "event"))
+    # one card per stay: a reasoning card (unexplained high, low after a dose or activity) replaces the plain context list for the same stay
+    stays = {x.key.rsplit(":", 1)[1] for x in c if x.category in ("unexplained_high", "low_after_dose", "post_activity_low")}
+    c[:] = [x for x in c if not (x.category == "episode_context" and x.key.rsplit(":", 1)[1] in stays)]
     for x in c:
         x.trigger = kind  # type: ignore[assignment]
     return c, why
 
 
-def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any]) -> None:
-    """Fill explanation/validation_status on each picked candidate. Never raises; failures degrade to deterministic text."""
+TAG_STRIP = re.compile(r"\s*\[\s*E\d+(?:\s*,\s*E\d+)*\s*\]")
+
+
+def rules_paragraph(c: Candidate) -> str:
+    """Python's own single paragraph: the verified sentences, tags removed. Used whenever the model's paragraph is missing or rejected."""
+    return " ".join(TAG_STRIP.sub("", s).strip() for s in c.claims).strip()
+
+
+def rules_reasoning(c: Candidate) -> str:
+    """Python's own 'how this was worked out' text for the back of the card, used when the model's is missing or rejected."""
+    parts = [f"How this was worked out: {c.method}."]
+    if c.coverage and c.coverage < 0.995:
+        parts.append(f"Readings covered {int(c.coverage * 100)}% of the period it looks at.")
+    if c.explanations:
+        parts.append("Possibilities this kind of pattern is checked against: " + "; ".join(o.text for o in c.explanations) + ".")
+    return " ".join(parts)
+
+
+def rules_safety(c: Candidate) -> str:
+    """Python's own safety text: what the insight cannot tell the reader, and who decides insulin questions."""
+    s = "This describes your recorded data and cannot show what caused it."
+    if any(o.care_team for o in c.explanations + c.suggestions):
+        s += " Anything about insulin, background insulin or settings is for your care team to decide."
+    return s
+
+
+def _debug(stats: dict[str, Any], c: Candidate, it: Any, viol: list) -> None:
+    """Only when INSIGHTS_DEBUG_REJECTIONS is set (benchmarks, never the timers): keep what was rejected and why, to calibrate the rules."""
+    if os.environ.get("INSIGHTS_DEBUG_REJECTIONS"):
+        stats.setdefault("rejected", []).append({"category": c.category, "violations": [[x.code, x.detail] for x in viol],
+                                                  "text": {k: it.get(k) for k in ("paragraph", "reasoning", "safety", "explanations_used", "suggestions_used")} if isinstance(it, dict) else None})
+
+
+def _openings(history: list[dict[str, Any]], words: int = 5) -> dict[str, list[str]]:
+    """The first words of the last few paragraphs per category, so the model starts differently this time."""
+    out: dict[str, list[str]] = {}
+    for h in sorted(history, key=lambda r: r.get("created_at"), reverse=True):
+        p = h.get("paragraph") or (h.get("content") or {}).get("paragraph")
+        if p:
+            lst = out.setdefault(h["category"], [])
+            if len(lst) < 3:
+                lst.append(" ".join(p.split()[:words]))
+    return out
+
+
+def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any], openings: Optional[dict[str, list[str]]] = None) -> None:
+    """Fill paragraph / validation_status on each picked candidate. Never raises; failures degrade to Python's own paragraph."""
+    openings = openings or {}
     ids = {f"I{i + 1}": d.candidate for i, d in enumerate(picked)}
     stats.setdefault("violations", Counter())
     if llm is None or not ids:
@@ -142,7 +203,7 @@ def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any
             c.validation_status = "fallback"
         stats["fallbacks"] = len(ids)
         return
-    payloads = [candidate_payload(c, iid) for iid, c in ids.items()]
+    payloads = [candidate_payload(c, iid, openings.get(c.category)) for iid, c in ids.items()]
     reply = llm.explain(payloads)
     stats["llm_calls"] = stats.get("llm_calls", 0) + 1
     stats["llm_latency_s"] = round(stats.get("llm_latency_s", 0.0) + reply.latency_s, 2)
@@ -169,6 +230,7 @@ def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any
         viol = [Violation("missing_result", "no result for this candidate")] if it is None else validate_item(it, c, iid, avail, accepted)
         if viol:
             failed[iid] = viol
+            _debug(stats, c, it, viol)
             for v in viol:
                 stats["violations"][v.code] += 1
         else:
@@ -177,7 +239,7 @@ def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any
     for iid, viol in failed.items():
         c = ids[iid]
         codes = ", ".join(sorted({v.code for v in viol}))
-        r2 = llm.explain([candidate_payload(c, iid)], correction=f"Your previous answer was rejected ({codes}). Use only numbers, units and evidence tags exactly as in the claims; no causes, no advice. Return the same JSON format.")
+        r2 = llm.explain([candidate_payload(c, iid, openings.get(c.category))], correction=f"Your previous answer was rejected ({codes}). Use only numbers exactly as in the claims; mention only the listed explanations and next steps, as possibilities, and point insulin topics to the care team; one plain paragraph; no doses, no timings, no causes stated as fact. Return the same JSON format.")
         stats["llm_calls"] += 1
         stats["retries"] = stats.get("retries", 0) + 1
         stats["llm_latency_s"] = round(stats["llm_latency_s"] + r2.latency_s, 2)
@@ -191,6 +253,7 @@ def _explain(picked: list, avail, llm: Optional[Explainer], stats: dict[str, Any
                 _accept(c, it2, accepted)
                 ok = True
             else:
+                _debug(stats, c, it2, viol2)
                 for v in viol2:
                     stats["violations"][v.code] += 1
         else:
@@ -205,11 +268,16 @@ def _accept(c: Candidate, it: dict[str, Any], accepted: list[str]) -> None:
         c.validation_status = "fallback"
         return
     # citation tags are for the validator and for storage, not for the reader: keep them in evidence_refs, strip them from the text
-    c.explanation = re.sub(r"\s*\[\s*E\d+(?:\s*,\s*E\d+)*\s*\]", "", it["explanation"]).strip()
+    c.paragraph = TAG_STRIP.sub("", it["paragraph"]).strip()
+    c.paragraph_source = "ai"
+    c.reasoning = TAG_STRIP.sub("", it["reasoning"]).strip()
+    c.safety = TAG_STRIP.sub("", it["safety"]).strip()
+    c.explanation = c.reasoning            # the 'explanation' field now carries how the insight was reasoned (back of the card)
     c.explanation_refs = list(it["evidence_refs"])
-    c.explanation_limitation = (re.sub(r"\s*\[\s*E\d+(?:\s*,\s*E\d+)*\s*\]", "", it["limitation"]).strip() if it["limitation"] else None)
+    c.explanations_used = list(it["explanations_used"])
+    c.suggestions_used = list(it["suggestions_used"])
     c.validation_status = "valid"
-    accepted.append(c.explanation)
+    accepted.append(c.paragraph)
 
 
 def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: Store, llm: Optional[Explainer], *, model_version: Optional[str] = None,
@@ -242,8 +310,12 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
             summ.trigger = kind  # type: ignore[assignment]
             summ.key = f"availability:{key}"
             picked = rank(decide([summ], history, now, th, weights), history, th, weights)
+        for d in picked:
+            d.candidate.paragraph = rules_paragraph(d.candidate)      # the defaults; replaced only by validated model text
+            d.candidate.reasoning = rules_reasoning(d.candidate)
+            d.candidate.safety = rules_safety(d.candidate)
         real = [d for d in picked if d.candidate.category != "data_availability"]
-        _explain(real, av, llm, stats)
+        _explain(real, av, llm, stats, _openings(history))
         out = []
         for d in picked:
             c = d.candidate

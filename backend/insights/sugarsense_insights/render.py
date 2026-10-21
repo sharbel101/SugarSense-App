@@ -25,13 +25,20 @@ HEADLINES = {
 
 
 def render(c: Candidate) -> dict:
-    """The stored/delivered content. 'facts_text' is authoritative; 'explanation' exists only if it passed validation."""
+    """The stored/delivered content. 'paragraph' is the ONE text a card shows: the model's validated paragraph (source 'ai') or Python's own (source 'rules').
+    facts_text, limitations and evidence stay available for a details view and for audit; the card does not need them."""
     return {
         "headline": HEADLINES.get(c.category, c.category),
+        "paragraph": c.paragraph or " ".join(c.claims),
+        "source": c.paragraph_source,
         "facts_text": list(c.claims),
-        "explanation": c.explanation,
+        "reasoning": c.reasoning or "",
+        "safety": c.safety or "",
+        "explanation": c.reasoning or "",          # back of the card: how it was reasoned (model's when validated, else Python's)
         "evidence_refs": list(c.explanation_refs),
-        "limitations": list(c.limitations) + ([c.explanation_limitation] if c.explanation_limitation else []),
+        "explanations_used": list(c.explanations_used),
+        "suggestions_used": list(c.suggestions_used),
+        "limitations": ([c.safety] if c.safety else []) + [l for l in c.limitations if not c.safety or l not in c.safety],   # back of the card: safety first, then data limits
         "validation_status": c.validation_status,
         "disclaimer": "Information from your recorded data, not medical advice. Safety alerts come from the alert system.",
     }

@@ -70,6 +70,9 @@ describe('GET /insights', () => {
     expect(first.factsText).toEqual(['Today so far: 3 stay(s) above 180 mg/dL [E2].']);
     expect(first.explanation).toBe('Glucose stayed above range three times.');
     expect(first.limitations).toHaveLength(1);
+    // a row written before v2 has no paragraph: the validated explanation is shown on the front, and the new back-of-card fields still exist
+    expect(first.paragraph).toBe('Glucose stayed above range three times.');
+    expect(first).toMatchObject({ source: 'rules', reasoning: 'Glucose stayed above range three times.', safety: null });
     expect(first.evidence).toMatchObject({ coverage: 1, method: 'stays outside the reporting range', qualityFlags: [] });
     expect(res.body.insights.map((i: { category: string }) => i.category)).toEqual(['episode_digest', 'episode_time_pattern']);
     // asked for the right user and limit, and only for active, unexpired rows
@@ -79,11 +82,20 @@ describe('GET /insights', () => {
     expect(sql).toMatch(/expires_at > now\(\)/);
   });
 
+  it('a v2 row returns the paragraph, source, reasoning and safety, with explanation mirroring the reasoning', async () => {
+    const content = { headline: 'Early morning high', paragraph: 'A front paragraph.', source: 'ai', reasoning: 'How it was reasoned.', safety: 'It cannot show a cause.', explanation: 'How it was reasoned.', facts_text: ['Fact [E1].'], limitations: ['It cannot show a cause.', 'No sleep record.'], evidence_refs: ['E1'] };
+    const query = vi.fn().mockResolvedValueOnce({ rows: [row({ content })] });
+    app = await appWith({ available: true, query });
+    const it0 = (await request(app.getHttpServer()).get('/insights').expect(200)).body.insights[0];
+    expect(it0).toMatchObject({ paragraph: 'A front paragraph.', source: 'ai', reasoning: 'How it was reasoned.', safety: 'It cannot show a cause.', explanation: 'How it was reasoned.' });
+    expect(it0.limitations[0]).toBe('It cannot show a cause.');
+  });
+
   it('a fallback insight has no explanation but keeps its facts', async () => {
     const query = vi.fn().mockResolvedValueOnce({ rows: [row({ validation_status: 'fallback', content: { headline: 'Last night', facts_text: ['Last night: no stay outside 70-180 mg/dL.'], explanation: null, limitations: [] } })] });
     app = await appWith({ available: true, query });
     const body = (await request(app.getHttpServer()).get('/insights').expect(200)).body;
-    expect(body.insights[0]).toMatchObject({ validation: 'fallback', explanation: null, evidenceRefs: [] });
+    expect(body.insights[0]).toMatchObject({ validation: 'fallback', explanation: null, evidenceRefs: [], paragraph: 'Last night: no stay outside 70-180 mg/dL.' });
     expect(body.insights[0].factsText).toHaveLength(1);
   });
 

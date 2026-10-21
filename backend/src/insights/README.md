@@ -17,7 +17,9 @@ HTTP 200, `status` discriminates:
     "id": "uuid", "category": "episode_digest", "headline": "Time outside your range", "trigger": "evening", "priority": 5.6,
     "createdAt": "...Z", "expiresAt": "...Z", "observationStart": "...Z", "observationEnd": "...Z",
     "factsText": ["Today so far: 3 stay(s) above 180 mg/dL totalling about 185 minutes, ..."],   // authoritative, always present
-    "explanation": "Glucose stayed above range three times.",                                      // string | null (null = did not pass validation)
+    "paragraph": "One paragraph for the front of the card.", "source": "ai",                      // ai | rules; always present
+    "reasoning": "How it was reasoned.", "safety": "What it cannot tell you.",                    // back of the card; string | null
+    "explanation": "Same as reasoning (kept field).",                                              // back of the card; string | null
     "limitations": ["Time without readings is unknown, not assumed in range."],                   // show them
     "validation": "valid",                                                                         // valid | fallback | not_applicable
     "evidenceRefs": ["E2"],
@@ -35,7 +37,7 @@ Categories: `episode_digest`, `episode_context`, `episode_time_pattern`, `meal_r
 
 ## Rules the client must keep
 
-`factsText` is the source of truth; `explanation` is optional readability. Never show a number that is not in `factsText`. Show `limitations`. Lows appear only as past episodes: this endpoint
+Front of the card = `paragraph`. Back = `factsText` (evidence, source of truth for numbers), `explanation` (how it was reasoned) and `limitations` (safety text first, then data limits). Never show a number that is not in `factsText`. Show `limitations`. Lows appear only as past episodes: this endpoint
 is not an alert channel. An insight past `expiresAt` is already excluded by the server; do not cache it past the response.
 
 ## Verified (2026-10-21)

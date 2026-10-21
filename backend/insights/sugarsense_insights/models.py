@@ -96,6 +96,7 @@ class Snapshot:
     sleeps: list[Sleep] = field(default_factory=list)
     wearables: list[WearableSample] = field(default_factory=list)
     forecast: list[ForecastPoint] = field(default_factory=list)
+    therapy: dict[str, Any] = field(default_factory=dict)       # user-entered settings that exist (e.g. morning_resistance: bool); empty = unknown
 
 
 class SnapshotSource(Protocol):
@@ -113,6 +114,14 @@ class Fact:
     value: Any                       # number or short string
     unit: str                        # mg/dL | % | min | h | count | "" ...
     kind: FactKind = "computed"
+
+
+@dataclass(frozen=True)
+class Option:
+    """A hedged possibility or a gentle next step the model MAY use for a pattern (menus.py). care_team=True: the text must point to the care team."""
+    id: str
+    text: str
+    care_team: bool = False
 
 
 @dataclass
@@ -134,10 +143,18 @@ class Candidate:
     untrusted: list[str] = field(default_factory=list)       # free text that must never be obeyed or echoed
     unit_of: dict[str, str] = field(default_factory=dict)    # extra allowed units
     priority: float = 0.0
+    explanations: list[Option] = field(default_factory=list)   # possible explanations the model may offer (hedged)
+    suggestions: list[Option] = field(default_factory=list)    # gentle next steps the model may offer
     # filled by the pipeline
-    explanation: Optional[str] = None
+    paragraph: Optional[str] = None            # the single paragraph shown on the card (model text that passed validation, else Python's)
+    paragraph_source: str = "rules"            # "ai" | "rules"
+    reasoning: Optional[str] = None            # back of the card: how it got there (which records were connected, which possibilities were weighed)
+    safety: Optional[str] = None               # back of the card: what this insight cannot tell the reader, and who decides insulin questions
+    explanation: Optional[str] = None          # legacy mirror of paragraph when source == "ai"
     explanation_limitation: Optional[str] = None
     explanation_refs: list[str] = field(default_factory=list)
+    explanations_used: list[str] = field(default_factory=list)
+    suggestions_used: list[str] = field(default_factory=list)
     validation_status: str = "not_applicable"
     facts_hash: str = ""
 

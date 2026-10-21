@@ -74,12 +74,15 @@ UNIT_WORD = {"mg/dL": "mg/dL", "%": "%", "min": "minutes", "g": "g", "count": ""
 
 
 def good_text(p: dict[str, Any]) -> dict[str, Any]:
-    """A faithful explanation built only from the candidate's own first claim (the payload carries claims + refs, not a facts table)."""
-    first = p["claims"][0]
-    refs = list(dict.fromkeys(re.findall(r"E\d+", first)))[:6]
-    txt = re.sub(r"\s*\[E\d+(?:,\s*E\d+)*\]", "", first)
-    txt = txt[:300] if len(txt) <= 300 else txt[:txt[:300].rfind(" ")].rstrip(",;:") + "."
-    return {"schema_version": "insight-explain-v1", "insight_id": p["insight_id"], "explanation": txt, "evidence_refs": refs or p["refs"][:1], "limitation": None, "insufficient_evidence": False}
+    """A faithful one-paragraph answer built only from the candidate's own claims (the payload carries claims + refs, no facts table)."""
+    joined = " ".join(p["claims"])
+    refs = list(dict.fromkeys(re.findall(r"E\d+", joined)))[:8]
+    txt = re.sub(r"\s*\[E\d+(?:,\s*E\d+)*\]", "", joined)
+    txt = txt if len(txt) <= 700 else txt[:txt[:700].rfind(". ") + 1]
+    reasoning = "This comes from your recorded readings: " + re.sub(r"\s*\[E\d+(?:,\s*E\d+)*\]", "", p["claims"][0])[:420]
+    safety = "This describes your recorded data only and cannot show what caused it, so it is not advice about doses or settings."
+    return {"schema_version": "insight-write-v2", "insight_id": p["insight_id"], "paragraph": txt, "reasoning": reasoning, "safety": safety, "evidence_refs": refs or p["refs"][:1],
+            "explanations_used": [], "suggestions_used": [], "insufficient_evidence": False}
 
 
 class FakeLLM:

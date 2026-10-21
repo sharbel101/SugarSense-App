@@ -87,6 +87,9 @@ function toItem(r: InsightRow): InsightItem | null {
   const evidence = storedEvidenceSchema.safeParse(r.evidence);
   const ev = evidence.success ? evidence.data : { facts: [], quality_flags: [] as string[] };
   const c = content.data;
+  const explanation = c.explanation && c.explanation.trim().length > 0 ? c.explanation : null;
+  // Rows written before the one-paragraph format have no paragraph: show the validated explanation, else the facts joined.
+  const paragraph = c.paragraph && c.paragraph.trim().length > 0 ? c.paragraph : (explanation ?? c.facts_text.join(' '));
   return {
     id: r.insight_id,
     category: r.category,
@@ -98,7 +101,11 @@ function toItem(r: InsightRow): InsightItem | null {
     observationStart: r.observation_start.toISOString(),
     observationEnd: r.observation_end.toISOString(),
     factsText: c.facts_text,
-    explanation: c.explanation && c.explanation.trim().length > 0 ? c.explanation : null,
+    paragraph,
+    source: c.source ?? (c.paragraph ? 'ai' : 'rules'),
+    reasoning: c.reasoning && c.reasoning.trim().length > 0 ? c.reasoning : explanation,
+    safety: c.safety && c.safety.trim().length > 0 ? c.safety : null,
+    explanation,
     limitations: c.limitations,
     validation: r.validation_status,
     evidenceRefs: c.evidence_refs,

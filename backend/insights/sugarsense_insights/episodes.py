@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from . import features as F
+from . import menus as M
 from .models import Candidate, Reading, Snapshot
 from .patterns import ASSOC, NOT_ADVICE, _B, _flag_limits, _hm, _r, _tz
 from .quality import Flag, coverage, in_window
@@ -157,9 +158,19 @@ def episode_time_pattern(snap: Snapshot, clean: list[Reading], d: date, trigger:
         e_h = b.add(f"block_start_{word}", f"{blk:02d}:00", "", "context")
         claims.append(f"A stay {word} range began between {blk:02d}:00 and {(blk + 3) % 24:02d}:00 on {k} of {n} days with readings in that period [{e_k}, {e_n}, {e_h}].")
     lows = "below" in best
+    expl, sugg = [], []
+    if "above" in best and 3 <= best["above"][2] < 12:      # a high that keeps starting in the morning
+        setting = bool(snap.therapy.get("morning_resistance"))
+        if setting:
+            b.add("morning_resistance_setting", "on", "", "context")
+            claims.append("Your own settings have the morning insulin-resistance option switched on.")
+        expl, sugg = M.MORNING_PATTERN_WITH_SETTING if setting else M.MORNING_PATTERN
+    elif best:
+        sugg = [M.LOG_CONTEXT]
     return Candidate(
         key=f"episode_time:{d.isoformat()}", category="episode_time_pattern", trigger=trigger, window=(F.local_dt(first, F.hhmm("00:00"), tz), snap.now),  # type: ignore[arg-type]
-        facts=b.facts, claims=claims, boundaries=[NOT_ADVICE, ASSOC, "Do not name a cause or advise on timing, insulin or food."] + ([LOW_NOTE] if lows else []),
+        facts=b.facts, claims=claims, boundaries=[NOT_ADVICE, ASSOC, "Possibilities only. Never state a cause as fact, a dose, units, or an exact timing."] + ([LOW_NOTE] if lows else []),
+        explanations=list(expl), suggestions=list(sugg),
         limitations=["Seen on a small number of days; this is an observation, not an established pattern."], coverage=1.0,
         method="stays outside the range counted per 3-hour block of the local day across days with enough readings",
         scores={"safety": 0.8 if lows else 0.4, "evidence": min(1.0, max(v[0] for v in best.values()) / 7), "recurrence": max(v[0] / v[1] for v in best.values()), "relevance": 0.9, "actionability": 0.5})

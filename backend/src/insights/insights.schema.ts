@@ -13,8 +13,13 @@ export type InsightsQuery = z.infer<typeof insightsQuerySchema>;
 export const storedContentSchema = z.object({
   headline: z.string().min(1).max(120),
   facts_text: z.array(z.string().max(1200)).min(1).max(10),
-  explanation: z.string().max(600).nullable().optional(),
-  limitations: z.array(z.string().max(400)).max(12).default([]),
+  /** v2: the one front-of-card paragraph. Older rows do not have it. */
+  paragraph: z.string().max(1200).nullable().optional(),
+  source: z.enum(['ai', 'rules']).optional(),
+  reasoning: z.string().max(1200).nullable().optional(),
+  safety: z.string().max(800).nullable().optional(),
+  explanation: z.string().max(1200).nullable().optional(),
+  limitations: z.array(z.string().max(800)).max(12).default([]),
   evidence_refs: z.array(z.string().max(8)).max(12).default([]),
   validation_status: z.enum(['valid', 'fallback', 'not_applicable']).optional(),
 });
@@ -48,9 +53,16 @@ export interface InsightItem {
   observationEnd: string;
   /** The factual sentences. Authoritative: every number comes from the engine's own calculations. Always present. */
   factsText: string[];
-  /** Plain-language explanation by the local model. null when it did not pass validation (the factsText still stands). */
+  /** FRONT of the card: one paragraph. 'ai' = written by the local model and validated; 'rules' = the engine's own wording. Always present. */
+  paragraph: string;
+  source: 'ai' | 'rules';
+  /** BACK of the card, "how this insight was reasoned": where it came from. Also returned as `explanation` for the existing field. */
+  reasoning: string | null;
+  /** BACK of the card, "safety": what this insight cannot tell you. */
+  safety: string | null;
+  /** BACK of the card: same text as `reasoning` (field kept for the existing UI). null on rows written before v2 that had no explanation. */
   explanation: string | null;
-  /** Material data limitations ("No sleep record, so nothing is said about sleep quality."). Show them. */
+  /** BACK of the card: the safety text first, then the material data limitations. Show them. */
   limitations: string[];
   /** 'valid' = model explanation present and validated; 'fallback' = Python text only; 'not_applicable' = availability summary. */
   validation: 'valid' | 'fallback' | 'not_applicable';
