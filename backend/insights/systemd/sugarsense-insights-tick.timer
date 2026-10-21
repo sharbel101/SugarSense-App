@@ -1,0 +1,13 @@
+# NOT INSTALLED, NOT ENABLED. Fires every 15 minutes; the tick decides what is due, so changing a user's wake/recap time needs no unit edit.
+# Morning/evening runs are keyed by local date and are idempotent, so a missed or repeated tick never duplicates an insight.
+[Unit]
+Description=Run the SugarSense insight tick every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=30
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,25 @@
+# NOT INSTALLED, NOT ENABLED. Review first (see ../README.md section "Rollout").
+# One short batch pass: decides which of morning / evening / event is due for each user (in the USER's timezone), runs it, exits.
+# Output is counts and timings only; no glucose values, notes or insight text go to the journal.
+[Unit]
+Description=SugarSense insight engine tick (morning/evening/event; idempotent)
+After=network.target postgresql.service sugarsense-llm.service
+Wants=sugarsense-llm.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sugarsense-insights
+# Only DATABASE_URL (the least-privilege APP role) and INSIGHTS_LLM_URL belong in this file; never the migration/owner URL.
+EnvironmentFile=/etc/sugarsense-insights.env
+Environment=PYTHONPATH=/home/ubuntu/sugarsense-insights PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ubuntu/sugarsense-insights/venv/bin/python -m sugarsense_insights tick --all-users
+# the engine is light; the model runs in its own CPU-capped container. Keep this pass polite and bounded.
+Nice=10
+CPUQuota=100%
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only

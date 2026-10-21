@@ -1,0 +1,21 @@
+# NOT INSTALLED, NOT ENABLED. The local explanation model: Qwen3.5-4B Q4_K_M in the llama.cpp server image already on the VM.
+# Localhost only (never published), one request at a time, hard cap of 4 CPUs and 8 GiB, lowest priority.
+# Idle cost is about 3 GiB of RAM and no CPU. Stop it any time: `systemctl stop sugarsense-llm` (the engine then uses its deterministic text).
+[Unit]
+Description=SugarSense local LLM (llama.cpp server, Qwen3.5-4B Q4_K_M, localhost only)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=docker
+ExecStartPre=-/usr/bin/docker rm -f sugarsense-llm
+ExecStart=/usr/bin/docker run --rm --name sugarsense-llm --cpus 4 --memory 8g -p 127.0.0.1:8181:8080 -v /home/ubuntu/models:/models:ro ghcr.io/ggml-org/llama.cpp:server -m /models/Qwen3.5-4B-Q4_K_M.gguf -c 8192 -t 4 --parallel 1 --host 0.0.0.0 --port 8080 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+ExecStop=/usr/bin/docker stop sugarsense-llm
+Restart=on-failure
+RestartSec=30
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

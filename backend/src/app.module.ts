@@ -4,6 +4,7 @@ import { DbModule } from './db/db.module.js';
 import { ForecastingModule } from './forecasting/forecasting.module.js';
 import { GlucoseModule } from './glucose/glucose.module.js';
 import { HealthController } from './health.controller.js';
+import { InsightsModule } from './insights/insights.module.js';
 import { MealsModule } from './meals/meals.module.js';
 
 @Module({
@@ -14,6 +15,7 @@ import { MealsModule } from './meals/meals.module.js';
     MealsModule,
     GlucoseModule,
     ForecastingModule,
+    InsightsModule,
   ],
   controllers: [HealthController],
 })
