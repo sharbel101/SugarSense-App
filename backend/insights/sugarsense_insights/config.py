@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-ENGINE_VERSION = "insights-0.2.0"
+ENGINE_VERSION = "insights-0.2.2"
 PROMPT_VERSION = "insight-write-v2"
 SCHEMA_VERSION = "insight-write-v2"
 

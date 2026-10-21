@@ -300,7 +300,7 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
         av = assess(snap, clean, flags)
         cands, why = build_candidates(kind, snap, clean, flags, av)
         history = store.history(user_id, now - timedelta(days=14)) if persist else []
-        decisions = decide(cands, history, now, th, weights)
+        decisions = decide(cands, history, now, th, weights, ENGINE_VERSION)
         stats["candidates"] = len(cands)
         stats["dropped_duplicate"] = sum(1 for d in decisions if d.action == "drop_duplicate")
         stats["dropped_cooldown"] = sum(1 for d in decisions if d.action == "drop_cooldown")
@@ -309,7 +309,7 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
             summ = availability_summary(why)
             summ.trigger = kind  # type: ignore[assignment]
             summ.key = f"availability:{key}"
-            picked = rank(decide([summ], history, now, th, weights), history, th, weights)
+            picked = rank(decide([summ], history, now, th, weights, ENGINE_VERSION), history, th, weights)
         for d in picked:
             d.candidate.paragraph = rules_paragraph(d.candidate)      # the defaults; replaced only by validated model text
             d.candidate.reasoning = rules_reasoning(d.candidate)

@@ -51,7 +51,7 @@ def _material(old: list[list[Any]], new: Candidate, th: Thresholds) -> bool:
     return False
 
 
-def decide(candidates: list[Candidate], history: list[dict[str, Any]], now: datetime, th: Thresholds, w: Weights = Weights()) -> list[Decision]:
+def decide(candidates: list[Candidate], history: list[dict[str, Any]], now: datetime, th: Thresholds, w: Weights = Weights(), engine_version: str | None = None) -> list[Decision]:
     """history rows: dict(insight_id, dedupe_key, category, trigger, facts_hash, content_version, created_at, status, evidence_facts=[[name,value,unit]...])."""
     out: list[Decision] = []
     seen_keys: set[str] = set()
@@ -64,6 +64,9 @@ def decide(candidates: list[Candidate], history: list[dict[str, Any]], now: date
         last = same[-1] if same else None
         if last and "paragraph" in last and not last["paragraph"] and last["status"] == "active":
             out.append(Decision(c, "supersede", last["insight_id"], last["content_version"] + 1))   # stored in the older multi-block format: rewrite it as one paragraph
+            continue
+        if last and last["status"] == "active" and last.get("source") == "rules" and engine_version and last.get("engine_version") not in (None, engine_version):
+            out.append(Decision(c, "supersede", last["insight_id"], last["content_version"] + 1))   # the engine's own wording stood in for the model; a newer engine version gets one more try
             continue
         if last and last["facts_hash"] == c.facts_hash and last["status"] in ("active", "superseded"):
             out.append(Decision(c, "drop_duplicate"))

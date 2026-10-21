@@ -81,6 +81,22 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(r2.state, "skipped_complete")
         self.assertEqual(len(store.insights), n); self.assertEqual(len(llm.calls), 1)
 
+    def test_cards_the_engine_wrote_itself_get_one_more_try_after_an_engine_upgrade(self):
+        from unittest import mock
+        from sugarsense_insights.llm import LlmReply
+        snap = snapshot(MORNING, days=9)
+        down = FakeLLM(lambda i, p, c: LlmReply(None, "unavailable", 0.0, 0, 0))
+        store = InMemoryStore()
+        run("morning", USER, MORNING, FakeSource(snap), store, down)
+        self.assertTrue(store.insights and all(i["content"]["source"] == "rules" for i in store.insights.values()))
+        same = run("morning", USER, MORNING + timedelta(minutes=20), FakeSource(snap), store, FakeLLM())
+        self.assertEqual(same.state, "skipped_complete")
+        with mock.patch("sugarsense_insights.pipeline.ENGINE_VERSION", "insights-9.9.9"):
+            r = run("morning", USER, MORNING + timedelta(minutes=40), FakeSource(snap), store, FakeLLM())
+        self.assertEqual(r.state, "complete")
+        self.assertTrue(any(i["content"]["source"] == "ai" and i["status"] == "active" for i in store.insights.values()))
+        self.assertTrue(any(i["status"] == "superseded" for i in store.insights.values()))
+
     def test_failed_run_can_be_retried_but_running_one_is_busy(self):
         store = InMemoryStore()
         snap = snapshot(MORNING, days=9)
