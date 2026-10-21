@@ -22,6 +22,7 @@ if [ -r "$CONFIG_FILE" ]; then set -a; . "$CONFIG_FILE"; set +a; fi
 : "${WEB_CHECK_URL:=http://127.0.0.1:8090}"
 : "${BACKEND_DIR:=$HOME/sugarsense-app}"
 : "${BACKEND_RESTART_CMD:=sudo systemctl restart sugarsense-backend}"
+: "${GARMIN_WEB_ENV_FILE:=/etc/sugarsense-garmin.env}"   # root-only file with EXPO_PUBLIC_GARMIN_API_TOKEN=... (never in git)
 : "${BACKEND_HEALTH_URL:=http://127.0.0.1:3000/health}"
 : "${KEEP_RELEASES:=5}"
 : "${RETRY_AFTER_SEC:=1800}"
@@ -218,7 +219,12 @@ deploy_web() {
 
   rm -rf "$out"; mkdir -p "$WORK_DIR"
   # --clear is mandatory: Metro's cache otherwise reuses a previously baked API URL.
-  (cd "$mobile" && EXPO_PUBLIC_API_URL=__SAME_ORIGIN__ EXPO_PUBLIC_WEB_SAME_ORIGIN=1 CI=1 \
+  # Garmin: the web build gets the API token from a root-only file (read with sudo, never from git, never logged) and NO Garmin URL, so the app uses the
+  # same-origin path /api/garmin/v1, which nginx proxies to the Garmin service. Without the file the Wearable screen simply stays on its demo data.
+  local garmin_token="" genv=()
+  garmin_token=$(sudo -n cat "$GARMIN_WEB_ENV_FILE" 2>/dev/null | sed -n 's/^EXPO_PUBLIC_GARMIN_API_TOKEN=//p' | head -n 1)
+  if [ -n "$garmin_token" ]; then genv=("EXPO_PUBLIC_GARMIN_API_TOKEN=$garmin_token"); else log "web: no Garmin token file ($GARMIN_WEB_ENV_FILE); Wearable stays on demo data"; fi
+  (cd "$mobile" && env -u EXPO_PUBLIC_GARMIN_API_URL ${genv[@]+"${genv[@]}"} EXPO_PUBLIC_API_URL=__SAME_ORIGIN__ EXPO_PUBLIC_WEB_SAME_ORIGIN=1 CI=1 \
       timeout 1200 npx expo export --platform web --clear --output-dir "$out" >"$WORK_DIR/export.log" 2>&1) 9>&- \
     || { log "web: expo export failed (tail of $WORK_DIR/export.log follows)"; tail -n 15 "$WORK_DIR/export.log"; return 1; }
 
