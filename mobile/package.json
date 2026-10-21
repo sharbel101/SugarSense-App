@@ -60,6 +60,7 @@
     "test:risk": "node --no-warnings --experimental-strip-types --test tests/riskAlerts.test.mjs",
     "test:pull": "node --no-warnings --experimental-strip-types --test tests/pullToRefresh.test.mjs",
     "test:headers": "node --no-warnings --experimental-strip-types --test tests/requestHeaders.test.mjs",
+    "test:insights": "node --no-warnings --experimental-strip-types --test tests/insights.test.mjs",
     "test:update": "node --no-warnings --experimental-strip-types --test tests/webUpdate.test.mjs",
     "check:contrast": "node --no-warnings --experimental-strip-types scripts/check-contrast.mjs",
     "doctor": "expo-doctor",
