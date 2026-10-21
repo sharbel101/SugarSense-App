@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-ENGINE_VERSION = "insights-0.2.3"
+ENGINE_VERSION = "insights-0.3.0"
 PROMPT_VERSION = "insight-write-v2"
 SCHEMA_VERSION = "insight-write-v2"
 
@@ -60,6 +60,20 @@ class Thresholds:
     post_activity_hours: int = 12        # a low starting within 12 h after activity ended can be linked to it (the effect on sensitivity lasts hours)
     low_after_dose_hours: int = 5        # a low 1-5 h after a bolus or correction is inside the insulin action window (about 5 h)
     activity_window_min: int = 120
+    # --- awareness: insulin and carbohydrate still active, low-heading warning, frequent lows, wearable context ------------------------------
+    insulin_action_hours: float = 5.0    # rapid-acting insulin is treated as fully worn off after 5 h, falling in a straight line: a rough estimate, labelled as one
+    carb_absorb_hours: float = 3.0       # logged carbohydrate is treated as fully absorbed after 3 h (same horizon as the meal window), falling in a straight line
+    heading_low_max_mgdl: float = 140.0  # the warning is only for a glucose that is already low-ish and falling; higher and falling is normal after a meal
+    heading_low_minutes: int = 20        # the fall is measured over the last 20 minutes (4 readings)
+    heading_low_slope: float = -0.8      # mg/dL per minute: about 16 mg/dL in 20 minutes
+    heading_low_min_iob: float = 0.5     # units still active by the estimate before insulin is named as a reason
+    heading_low_max_cob_g: float = 20.0  # more than this still absorbing and the fall is probably covered
+    heading_low_ttl_min: int = 60        # this card is stale quickly: it is a statement about the next hour
+    frequent_lows_days: int = 7
+    frequent_lows_min: int = 3           # at least 3 separate stays below range in 7 days ...
+    frequent_lows_min_days: int = 2      # ... on at least 2 different days
+    low_gap_min: int = 60                # two low readings more than an hour apart are two separate lows
+    garmin_context_hours: int = 3        # wearable context is taken from the 3 hours before a stay (same horizon as the records context)
     min_pairs_association: int = 7       # sleep/exercise associations need 7 paired observations; below that it is anecdote
     # --- scheduling / lifecycle -------------------------------------------------------------------------------------
     wake: str = "07:00"                  # default morning-briefing time (local); override per user

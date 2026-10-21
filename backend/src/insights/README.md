@@ -33,7 +33,7 @@ No database text, SQL, user id or connection detail is ever returned.
 
 Categories: `episode_digest`, `episode_context`, `episode_time_pattern`, `meal_response`, `recurring_meal_response`, `forecast_outlook`, `previous_day_context`, `data_quality`,
 `data_availability` (the honest "what the data allows today" summary), `exercise_association`, `sleep_association`, `insulin_timing_association`, and in `full` mode `overnight_summary`,
-`morning_rise_pattern`, `day_summary`, `baseline_change`, `glucose_excursion`. New categories can appear: unknown ones must still render from `headline` + `factsText`.
+`morning_rise_pattern`, `day_summary`, `baseline_change`, `glucose_excursion`. `unexplained_high`, `low_after_dose`, `post_activity_low`, `frequent_lows` and `heading_low` (a rough estimate that glucose may keep falling because insulin is still active and little food is logged; fixed wording written by the engine, `validation: "not_applicable"`, expires after 60 minutes, so show it prominently and hide it once `expiresAt` passes). New categories can appear: unknown ones must still render from `headline` + `factsText`.
 
 ## Rules the client must keep
 

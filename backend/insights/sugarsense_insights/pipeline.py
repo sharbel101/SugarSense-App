@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from . import awareness as A
 from . import episodes as E
 from . import reasoning as R
 from . import patterns as P
@@ -98,6 +99,7 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
             add(P.exercise_association(snap, clean))
             add(P.insulin_timing_association(snap, clean))
         add(E.episode_time_pattern(snap, clean, d, kind))
+        add(A.frequent_lows(snap, clean, flags, d))
         add(P.data_quality(snap, clean, flags, kind))
         if not av["history"].ok:
             why["recurring patterns"] = list(av["history"].reasons)
@@ -139,6 +141,7 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
         # an unexplained high replaces the plain excursion for the same stay (one card per stay)
         starts = {x.window[0] for x in c if x.category == "unexplained_high"}
         c[:] = [x for x in c if not (x.category == "glucose_excursion" and x.window[0] in starts)]
+        add(A.heading_low(snap, clean, flags))
         add(P.data_quality(snap, clean, flags, "event"))
     # one card per stay: a reasoning card (unexplained high, low after a dose or activity) replaces the plain context list for the same stay
     stays = {x.key.rsplit(":", 1)[1] for x in c if x.category in ("unexplained_high", "low_after_dose", "post_activity_low")}
@@ -168,6 +171,8 @@ def rules_reasoning(c: Candidate) -> str:
 
 def rules_safety(c: Candidate) -> str:
     """Python's own safety text: what the insight cannot tell the reader, and who decides insulin questions."""
+    if c.python_only:
+        return "This is a rough estimate from your logged records. It is not an alert, a diagnosis or a dose, and it cannot see food or insulin that was not logged. If you feel low, follow your care team's plan."
     s = "This describes your recorded data and cannot show what caused it."
     if any(o.care_team for o in c.explanations + c.suggestions):
         s += " Anything about insulin, background insulin or settings is for your care team to decide."
@@ -314,14 +319,16 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
             d.candidate.paragraph = rules_paragraph(d.candidate)      # the defaults; replaced only by validated model text
             d.candidate.reasoning = rules_reasoning(d.candidate)
             d.candidate.safety = rules_safety(d.candidate)
-        real = [d for d in picked if d.candidate.category != "data_availability"]
+        real = [d for d in picked if d.candidate.category != "data_availability" and not d.candidate.python_only]
         _explain(real, av, llm, stats, _openings(history))
         out = []
         for d in picked:
             c = d.candidate
-            if c.category == "data_availability":
+            if c.category == "data_availability" or c.python_only:
                 c.validation_status = "not_applicable"
             ttl = th.event_ttl_h if kind == "event" else th.scheduled_ttl_h
+            if c.ttl_min:
+                ttl = c.ttl_min / 60.0
             rec = {
                 "category": c.category, "trigger": kind, "dedupe_key": c.key, "facts_hash": c.facts_hash, "content_version": d.next_version,
                 "supersedes_insight_id": d.supersedes, "observation_start": c.window[0], "observation_end": c.window[1], "priority": c.priority,

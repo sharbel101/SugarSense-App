@@ -73,10 +73,10 @@ def decide(candidates: list[Candidate], history: list[dict[str, Any]], now: date
             continue
         if c.trigger == "event":
             recent = [h for h in history if h["category"] == c.category and h["trigger"] == "event" and now - h["created_at"] < timedelta(minutes=th.event_cooldown_min)]
-            if recent and not last:
+            if recent and not last and not c.python_only:
                 out.append(Decision(c, "drop_cooldown"))
                 continue
-        if last and c.trigger == "event" and now - last["created_at"] < timedelta(minutes=th.event_cooldown_min):
+        if last and c.trigger == "event" and not c.python_only and now - last["created_at"] < timedelta(minutes=th.event_cooldown_min):
             out.append(Decision(c, "drop_cooldown"))   # a growing event is not re-announced inside the cooldown; the evening recap carries the update
             continue
         if last:

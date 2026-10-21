@@ -40,3 +40,8 @@ MORNING_PATTERN = ([EARLY_MORNING_HORMONES, BASAL_COVERAGE, INSULIN_EFFECTIVENES
 MORNING_PATTERN_WITH_SETTING = ([MORNING_SETTING, EARLY_MORNING_HORMONES, BASAL_COVERAGE], [DISCUSS_MORNING_SETTING, LOG_CONTEXT])
 POST_ACTIVITY_LOW = ([ACTIVITY_SENSITIVITY], [WATCH_AFTER_ACTIVITY])
 LOW_AFTER_DOSE = ([DOSE_VS_CARBS, DOSE_OVERLAP], [DISCUSS_DOSE_REVIEW])
+
+# ---- frequent lows -----------------------------------------------------------------------------------------------------
+DOSE_FOOD_BALANCE = Option("dose_food_balance", "a dose that was large for the food it covered, or a meal that ended up smaller or later than planned, can lead to a low a few hours afterwards", care_team=True)
+DISCUSS_FREQUENT_LOWS = Option("discuss_frequent_lows", "lows that come back this often are worth going through with your care team, along with what your plan is for treating them", care_team=True)
+FREQUENT_LOWS = ([DOSE_FOOD_BALANCE, ACTIVITY_SENSITIVITY], [DISCUSS_FREQUENT_LOWS, LOG_CONTEXT])

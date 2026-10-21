@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from . import features as F
+from . import awareness as A
 from . import menus as M
 from .episodes import LOW_NOTE
 from .models import Candidate, Reading, Snapshot
@@ -71,6 +72,7 @@ def unexplained_high(snap: Snapshot, clean: list[Reading], flags: list[Flag], st
                 k += 1
         if n >= 3 and k >= 2:
             claims.append(f"A stay above range began within 90 minutes [{b.add('similar_window_minutes', 90, 'min', 'context')}] of this time on {k} of {n} other days with readings [{b.add('similar_days', k, 'count')}, {b.add('similar_days_covered', n, 'count')}].")
+        claims.extend(A.wearable_context(snap, ex.start, b))
         morning = 3 <= ex.start.astimezone(tz).hour < 11
         setting = bool(snap.therapy.get("morning_resistance")) and morning
         if setting:

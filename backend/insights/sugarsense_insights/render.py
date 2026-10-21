@@ -21,6 +21,11 @@ HEADLINES = {
     "episode_digest": "Time outside your range",
     "episode_context": "Around a stay outside range",
     "episode_time_pattern": "Time of day",
+    "unexplained_high": "A high with nothing logged before it",
+    "low_after_dose": "A low after a dose",
+    "post_activity_low": "A low after activity",
+    "heading_low": "Glucose may be heading low",
+    "frequent_lows": "Lows keep coming back",
 }
 
 

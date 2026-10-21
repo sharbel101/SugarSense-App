@@ -55,6 +55,9 @@ class PgSource:
                     wear.append(WearableSample(r[0], "heart_rate", float(r[1]), "bpm", "context_features"))
                 if r[2] is not None:
                     wear.append(WearableSample(r[0], "hrv_rmssd", float(r[2]), "ms", "context_features"))
+            garmin = _garmin(c, user_id, since)
+            wear.extend(garmin[0])
+            acts.extend(garmin[1])
             fc = [ForecastPoint(r[0], int(r[1]), r[2], float(r[3]), float(r[4]), float(r[5]), float(r[6])) for r in c.execute(
                 """SELECT anchor_at, horizon_min, target_at, predicted_mgdl, lower_mgdl, upper_mgdl, interval_level FROM predictions
                    WHERE user_id=%s AND anchor_at = (SELECT max(anchor_at) FROM predictions WHERE user_id=%s) ORDER BY horizon_min""", (user_id, user_id)).fetchall()]
@@ -68,3 +71,30 @@ class PgSource:
             except Exception:
                 therapy = {}
         return Snapshot(settings, now, readings, meals, insulin, acts, sleeps, wear, fc, therapy)
+
+
+# Garmin metrics are polled and stored by garmin-service (migration 0011); the engine only READS what is already stored and never calls Garmin.
+# The table has no user column (one watch), so the data is attached to exactly one user: the one named in INSIGHTS_GARMIN_USER_ID. Unset = not attached.
+GARMIN_INSTANT = ("heart_rate", "stress_level", "body_battery")
+GARMIN_DAILY = ("sleep_duration", "sleep_score", "hrv_overnight_avg", "resting_heart_rate")
+
+
+def _garmin(c, user_id: str, since: datetime) -> tuple[list[WearableSample], list[Activity]]:
+    import os
+    if os.environ.get("INSIGHTS_GARMIN_USER_ID") != user_id:
+        return [], []
+    try:
+      with c.transaction():   # a savepoint: a failure here must not poison the transaction the rest of the snapshot is read in
+        if c.execute("SELECT to_regclass('public.garmin_observations')").fetchone()[0] is None:
+            return [], []   # not installed yet: no wearable data, nothing else changes
+        horizon = max(since, datetime.now(timezone.utc) - timedelta(days=3))
+        wear: list[WearableSample] = []
+        for name, t, v, unit in c.execute(
+                "SELECT metric, measured_at, value_num, unit FROM garmin_observations WHERE metric = ANY(%s) AND value_num IS NOT NULL AND measured_at >= %s ORDER BY measured_at",
+                (list(GARMIN_INSTANT + GARMIN_DAILY), horizon)).fetchall():
+            wear.append(WearableSample(t, name, float(v), unit or "", "garmin"))
+        acts = [Activity(t, str((j or {}).get("type") or "exercise"), float(v) / 60.0, None, "garmin") for t, v, j in c.execute(
+            "SELECT measured_at, value_num, value_json FROM garmin_observations WHERE metric = 'exercise_session' AND value_num IS NOT NULL AND measured_at >= %s", (since,)).fetchall()]
+        return wear, acts
+    except Exception:
+        return [], []   # a missing column or a locked table must never take the engine down

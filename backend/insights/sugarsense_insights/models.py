@@ -145,6 +145,8 @@ class Candidate:
     priority: float = 0.0
     explanations: list[Option] = field(default_factory=list)   # possible explanations the model may offer (hedged)
     suggestions: list[Option] = field(default_factory=list)    # gentle next steps the model may offer
+    python_only: bool = False        # the wording is fixed in Python (time-critical or safety-relevant); the model is never asked
+    ttl_min: Optional[int] = None    # expires sooner than the trigger's default
     # filled by the pipeline
     paragraph: Optional[str] = None            # the single paragraph shown on the card (model text that passed validation, else Python's)
     paragraph_source: str = "rules"            # "ai" | "rules"
