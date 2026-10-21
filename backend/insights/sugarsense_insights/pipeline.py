@@ -291,6 +291,10 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
     th = snap.settings.th
     key = run_key_for(kind, snap)
     if persist:
+        # A data-quality card describes a moment ("latest reading is 63 minutes old"). When the condition is gone it must not keep showing as current.
+        clean0, flags0 = clean_readings(snap.readings, now, th)
+        if P.data_quality(snap, clean0, flags0, kind) is None:
+            store.expire_category(user_id, "data_quality", now)
         run_id, state = store.claim_run(user_id, key, kind, now, ENGINE_VERSION, PROMPT_VERSION, model_version)
         if state == "complete":
             return RunResult(key, "skipped_complete")

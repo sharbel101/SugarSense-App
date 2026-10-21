@@ -288,6 +288,15 @@ class Events(unittest.TestCase):
         self.assertEqual([i["category"] for i in r.insights], ["data_quality"])
         self.assertIn("not a current measurement", " ".join(r.insights[0]["content"]["facts_text"]))
 
+    def test_a_data_quality_card_is_retired_once_fresh_readings_arrive(self):
+        now = local(2026, 10, 21, 12, 0)
+        store = InMemoryStore()
+        run("event", USER, now, FakeSource(snapshot(now, readings=cgm(2, now - timedelta(hours=3)))), store, FakeLLM())
+        self.assertEqual([i["category"] for i in store.active(USER, now)], ["data_quality"])
+        later = now + timedelta(minutes=20)
+        run("event", USER, later, FakeSource(snapshot(later)), store, FakeLLM())   # readings are current again
+        self.assertNotIn("data_quality", [i["category"] for i in store.active(USER, later)])
+
 
 class Schedule(unittest.TestCase):
     def test_due_kinds_respect_user_timezone_and_window(self):

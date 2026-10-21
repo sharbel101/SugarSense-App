@@ -18,6 +18,7 @@ class Store(Protocol):
     def history(self, user_id: str, since: datetime) -> list[dict[str, Any]]: ...
     def save_insight(self, user_id: str, run_id: int, rec: dict[str, Any]) -> str: ...
     def supersede(self, insight_id: str, now: datetime) -> None: ...
+    def expire_category(self, user_id: str, category: str, now: datetime) -> int: ...
     def active(self, user_id: str, now: datetime) -> list[dict[str, Any]]: ...
 
 
@@ -58,6 +59,14 @@ class InMemoryStore:
 
     def supersede(self, insight_id, now):
         self.insights[insight_id]["status"] = "superseded"
+
+    def expire_category(self, user_id, category, now):
+        n = 0
+        for i in self.insights.values():
+            if i["user_id"] == user_id and i["category"] == category and i["status"] == "active":
+                i["status"] = "expired"
+                n += 1
+        return n
 
     def active(self, user_id, now):
         out = []
@@ -117,6 +126,10 @@ class PgStore:
     def supersede(self, insight_id, now):
         with self._conn() as c:
             c.execute("UPDATE insights SET status='superseded' WHERE insight_id=%s", (insight_id,))
+
+    def expire_category(self, user_id, category, now):
+        with self._conn() as c:
+            return c.execute("UPDATE insights SET status='expired', updated_at=%s WHERE user_id=%s AND category=%s AND status='active'", (now, user_id, category)).rowcount
 
     def active(self, user_id, now):
         with self._conn() as c:
