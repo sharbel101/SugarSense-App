@@ -26,6 +26,7 @@ export type RootStackParamList = {
   InsulinSettings: undefined;
   MealHistory: undefined;
   InsulinHistory: undefined;
+  WearableMetric: { metric: import('../services/wearableModel').MetricKey };
 };
 
 declare global {

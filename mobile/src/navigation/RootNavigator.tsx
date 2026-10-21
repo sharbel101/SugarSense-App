@@ -9,6 +9,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { WearableScreen } from '../screens/WearableScreen';
 import { InsulinHistoryScreen } from '../screens/InsulinHistoryScreen';
+import { WearableMetricScreen } from '../screens/WearableMetricScreen';
 import { InsulinSettingsScreen } from '../screens/InsulinSettingsScreen';
 import { MealHistoryScreen } from '../screens/MealHistoryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -20,7 +21,7 @@ import { RootStackParamList, TabParamList } from './types';
 
 /** Screens where the global "+" is hidden: the scan flow is deliberately immersive, Profile is a modal. */
 // Home has its own Add meal / Log insulin buttons, so the floating + is hidden there.
-const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory', 'InsulinHistory']);
+const FAB_HIDDEN_ROUTES = new Set(['Home', 'Camera', 'MealReview', 'PostMeal', 'Profile', 'InsulinSettings', 'MealHistory', 'InsulinHistory', 'WearableMetric']);
 
 const Tab = createBottomTabNavigator<TabParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -92,6 +93,7 @@ export function RootNavigator() {
         <RootStack.Screen name="InsulinSettings" component={InsulinSettingsScreen} />
         <RootStack.Screen name="MealHistory" component={MealHistoryScreen} />
         <RootStack.Screen name="InsulinHistory" component={InsulinHistoryScreen} />
+        <RootStack.Screen name="WearableMetric" component={WearableMetricScreen} />
       </RootStack.Navigator>
     </NavigationContainer>
     <QuickAddFab hidden={FAB_HIDDEN_ROUTES.has(leafRoute)} />
