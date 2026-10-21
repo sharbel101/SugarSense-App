@@ -13,7 +13,7 @@ const daily = (vals) => vals.map((v, i) => day(vals.length - 1 - i, v));
 test('freshness comes from the measurement time: fresh, delayed, stale, none', () => {
   assert.equal(freshnessOf(NOW - 4 * 60_000, NOW, 'instant').state, 'fresh');
   assert.match(freshnessOf(NOW - 4 * 60_000, NOW, 'instant').text, /^Measured \d{1,2}:\d{2} (AM|PM) \(4 min ago\)$/);
-  const d = freshnessOf(NOW - 45 * 60_000, NOW, 'instant');
+  const d = freshnessOf(NOW - 2 * HOUR, NOW, 'instant');
   assert.equal(d.state, 'delayed');
   assert.match(d.text, /^Data delayed/);
   assert.equal(freshnessOf(NOW - 5 * HOUR, NOW, 'instant').state, 'stale');

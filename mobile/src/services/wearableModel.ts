@@ -169,8 +169,8 @@ export function ageText(minutes: number): string {
   return `${Math.floor(m / 1440)} d ago`;
 }
 
-export const FRESH_INSTANT_MIN = 15;
-export const DELAYED_INSTANT_MIN = 120;
+export const FRESH_INSTANT_MIN = 60;
+export const DELAYED_INSTANT_MIN = 240;
 export const FRESH_DAILY_MIN = 36 * 60;
 
 /** Fresh / delayed / stale from the MEASUREMENT time (not from when the request succeeded). */
