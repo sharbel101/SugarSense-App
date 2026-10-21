@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 import { garminConfig } from '../api/garminApi';
 import type { GarminError } from '../api/garminContract';
 import { buildWearableFromGarmin, type GarminSnapshot } from './garminAdapter';
-import { loadGarmin, refreshGate, type HistoryBundle } from './garminLoad';
+import { EMPTY_HISTORY, HISTORY_REFRESH_MS, loadGarminFast, loadHistoryBundle, refreshGate, type HistoryBundle } from './garminLoad';
 import { getWearableData } from './wearableData';
 import type { WearableData } from './wearableModel';
 
@@ -25,6 +25,8 @@ type Ctx = {
   error: GarminError | null;
   /** True when a real Garmin source is configured; false = labelled demo data. */
   live: boolean;
+  /** The latest values are on screen but the charts' history has not loaded (yet, or it failed). */
+  historyIncomplete: boolean;
   /** Pull-to-refresh / Retry. Calls the API only if the 6-minute limit allows; otherwise says how long to wait. */
   refresh: () => { started: boolean; waitMs: number };
   /** When the data on screen was last loaded (device clock), or null. */
@@ -42,6 +44,7 @@ export function WearableProvider({ children }: { children: React.ReactNode }) {
   const [snapshot, setSnapshot] = useState<{ data: WearableData; at: number } | null>(null);
   const [loading, setLoading] = useState(live);
   const [error, setError] = useState<GarminError | null>(null);
+  const [historyIncomplete, setHistoryIncomplete] = useState(false);
   const [demoAt, setDemoAt] = useState(() => Date.now());
   const watchers = useRef(0);
   const runRef = useRef<(() => { started: boolean; waitMs: number }) | null>(null);
@@ -57,24 +60,45 @@ export function WearableProvider({ children }: { children: React.ReactNode }) {
 
     let last: { at: number; ok: boolean } | null = null;
 
+    // The latest values (two small calls) are shown as soon as they arrive; the history for the charts follows. A slow or failed history never blocks
+    // the screen, and an exception while building the screen becomes an error message instead of an endless "Loading".
     const go = async (t: number) => {
       const mine = new AbortController();
       controller = mine;
       setLoading(true);
-      const out = await loadGarmin(cfg, t, history, mine.signal);
-      last = { at: t, ok: out.ok };
-      if (controller === mine) controller = null;
-      if (disposed || mine.signal.aborted) return;
-      setLoading(false);
-      setClock(Date.now());
-      if (!out.ok) {
-        if (out.error !== 'aborted') setError(out.error);
-        return;
+      try {
+        const fast = await loadGarminFast(cfg, mine.signal);
+        last = { at: t, ok: fast.ok };
+        if (disposed || mine.signal.aborted) return;
+        setClock(Date.now());
+        if (!fast.ok) {
+          if (fast.error !== 'aborted') setError(fast.error);
+          return;
+        }
+        const publish = (h: HistoryBundle) => {
+          const s: GarminSnapshot = { latest: fast.latest, status: fast.status, ...h };
+          setSnapshot({ data: buildWearableFromGarmin(s, t), at: t });
+        };
+        const needHistory = !history || t - history.at >= HISTORY_REFRESH_MS;
+        publish(history ? history.history : EMPTY_HISTORY);
+        setError(null);
+        if (!needHistory) return;
+        setHistoryIncomplete(true);
+        const hist = await loadHistoryBundle(cfg, t, mine.signal);
+        if (disposed || mine.signal.aborted) return;
+        if (hist.ok) {
+          history = { history: hist.data, at: t };
+          publish(hist.data);
+          setHistoryIncomplete(false);
+        }
+      } catch {
+        if (!disposed && !mine.signal.aborted) setError('bad_body');
+      } finally {
+        if (controller === mine) {
+          controller = null;
+          setLoading(false);
+        }
       }
-      const s: GarminSnapshot = out.snapshot;
-      history = { history: { heartRate: s.heartRate, stepsToday: s.stepsToday, stressBattery: s.stressBattery, daily: s.daily, exercises: s.exercises }, at: out.historyAt ?? t };
-      setError(null);
-      setSnapshot({ data: buildWearableFromGarmin(s, t), at: t });
     };
     const run = (): { started: boolean; waitMs: number } => {
       if (controller) return { started: false, waitMs: 0 };
@@ -136,7 +160,10 @@ export function WearableProvider({ children }: { children: React.ReactNode }) {
   const now = live ? (data ? clock + data.clockOffsetMs : clock) : demoAt;
 
   const updatedAt = live ? (snapshot ? snapshot.at : null) : demoAt;
-  const value = useMemo<Ctx>(() => ({ data, now, loading, error, live, refresh, updatedAt, watch }), [data, now, loading, error, live, refresh, updatedAt, watch]);
+  const value = useMemo<Ctx>(
+    () => ({ data, now, loading, error, live, historyIncomplete: live && historyIncomplete, refresh, updatedAt, watch }),
+    [data, now, loading, error, live, historyIncomplete, refresh, updatedAt, watch],
+  );
   return <WearableContext.Provider value={value}>{children}</WearableContext.Provider>;
 }
 

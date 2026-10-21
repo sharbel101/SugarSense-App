@@ -46,7 +46,7 @@ function startOfDay(ms: number): number {
 export function WearableScreen({ navigation }: TabScreenProps<'Wearable'>) {
   const colors = useColors();
   const bottomPad = useTabScreenBottomPadding();
-  const { data, now, refresh, loading, error, live, updatedAt } = useWearable();
+  const { data, now, refresh, loading, error, live, updatedAt, historyIncomplete } = useWearable();
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -99,11 +99,20 @@ export function WearableScreen({ navigation }: TabScreenProps<'Wearable'>) {
         {data === null ? (
           error ? (
             <StateMessage title="Garmin data unavailable" text={garminErrorText(error)} onRetry={() => void refresh()} busy={loading} />
-          ) : (
+          ) : loading ? (
             <StateMessage title="Loading your Garmin data" text="Reading your latest measurements." busy />
+          ) : (
+            <StateMessage title="Garmin data has not loaded yet" text="Nothing is loading right now. Try again." onRetry={() => void refresh()} />
           )
         ) : (
+          <>
+            {historyIncomplete && !loading ? (
+              <View accessibilityRole="alert" style={{ backgroundColor: colors.divider, borderRadius: radius.row, padding: 12 }}>
+                <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>The charts are still loading. Pull down to try again.</Text>
+              </View>
+            ) : null}
           <Overview data={data} now={now} error={error} loading={loading} onRetry={() => void refresh()} open={(metric) => navigation.getParent()?.navigate('WearableMetric', { metric })} />
+          </>
         )}
       </PullToRefreshScrollView>
     </SafeAreaView>

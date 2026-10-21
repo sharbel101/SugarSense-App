@@ -115,6 +115,27 @@ class RateLimiter:
         return True
 
 
+THINNABLE_KINDS = ("instant", "interval")
+
+
+def thin_rows(rows, max_points: int):
+    """Keep at most `max_points` rows per metric by taking evenly spaced ones (always the first and the last), for sample-like metrics only.
+    Events and daily summaries are never thinned. This only reduces what is sent to a phone; stored data is untouched and no value is changed or averaged."""
+    by: dict = {}
+    for r in rows:
+        by.setdefault(r.metric, []).append(r)
+    keep: set = set()
+    thinned = False
+    for name, rs in by.items():
+        if len(rs) > max_points and rs[0].kind in THINNABLE_KINDS:
+            thinned = True
+            n = len(rs)
+            keep.update(id(rs[round(i * (n - 1) / (max_points - 1))]) for i in range(max_points))
+        else:
+            keep.update(id(r) for r in rs)
+    return [r for r in rows if id(r) in keep], thinned
+
+
 def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.utc)) -> Starlette:
     limiter = RateLimiter(settings.rate_per_minute)
 
@@ -227,6 +248,14 @@ def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.u
                 raise ApiError(400, "invalid_parameter", "'limit' must be an integer") from None
             if not 1 <= limit <= settings.history_max_limit:
                 raise ApiError(400, "invalid_parameter", f"'limit' must be between 1 and {settings.history_max_limit}")
+        max_points = None
+        if q.get("max_points") is not None:
+            try:
+                max_points = int(q["max_points"])
+            except ValueError:
+                raise ApiError(400, "invalid_parameter", "'max_points' must be an integer") from None
+            if not 10 <= max_points <= 2000:
+                raise ApiError(400, "invalid_parameter", "'max_points' must be between 10 and 2000")
         after = None
         if q.get("cursor"):
             if not _CURSOR.match(q["cursor"]):
@@ -236,6 +265,9 @@ def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.u
         rows = store.history(names, start, end, limit + 1, after)
         more = len(rows) > limit
         rows = rows[:limit]
+        thinned = False
+        if max_points is not None:
+            rows, thinned = thin_rows(rows, max_points)
         obs = []
         for o in rows:
             e = entry(o, now)
@@ -248,7 +280,7 @@ def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.u
             last = rows[-1]
             cursor = f"{int(last.measured_at.timestamp() * 1_000_000)}.{last.id}"
         return JSONResponse(
-            {"source": "garmin", "generated_at": iso(now), "from": iso(start), "to": iso(end), "metrics_requested": names, "count": len(obs), "limit": limit, "has_more": more, "next_cursor": cursor, "order": "measured_at ascending", "observations": obs},
+            {"source": "garmin", "generated_at": iso(now), "from": iso(start), "to": iso(end), "metrics_requested": names, "count": len(obs), "limit": limit, "thinned": thinned, "has_more": more, "next_cursor": cursor, "order": "measured_at ascending", "observations": obs},
             headers=_headers(),
         )
 

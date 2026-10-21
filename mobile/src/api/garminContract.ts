@@ -261,14 +261,14 @@ export const fetchStatus = (cfg: GarminConfig, signal?: AbortSignal) => garminGe
 /** History for `metrics` between `from` and `to` (ISO, UTC). Follows `next_cursor` up to `maxPages` pages. */
 export async function fetchHistory(
   cfg: GarminConfig,
-  q: { metrics: string[]; from: string; to: string; limit?: number; maxPages?: number },
+  q: { metrics: string[]; from: string; to: string; limit?: number; maxPages?: number; maxPoints?: number },
   signal?: AbortSignal,
 ): Promise<GarminResult<GarminHistory>> {
   const maxPages = q.maxPages ?? 6;
   const all: GarminObservation[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page++) {
-    const r = await garminGet(cfg, '/metrics/history', { metrics: q.metrics.join(','), from: q.from, to: q.to, limit: q.limit ?? 500, cursor }, parseHistoryPage, signal);
+    const r = await garminGet(cfg, '/metrics/history', { metrics: q.metrics.join(','), from: q.from, to: q.to, limit: q.limit ?? 500, max_points: q.maxPoints, cursor }, parseHistoryPage, signal);
     if (!r.ok) return r;
     all.push(...r.data.observations);
     if (!r.data.hasMore || !r.data.nextCursor) return { ok: true, data: { observations: all, truncated: false } };

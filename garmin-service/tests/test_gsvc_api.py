@@ -180,3 +180,39 @@ def test_the_catalogue_lists_origins_and_the_unsupported_with_reasons():
     j = c.get(PREFIX + "/metrics", headers=H).json()
     assert j["metrics"]["stress_level"]["origin"] == "garmin_derived" and j["metrics"]["heart_rate"]["origin"] == "raw_sensor"
     assert "glucose" in j["unsupported"] and "skin_temperature" in j["unsupported"]
+
+
+def _many_hr(st, n=300):
+    st.upsert_observations([Obs("heart_rate", NOW - timedelta(minutes=2 * k), "instant", value_num=60 + (k % 40), source_tool="get_heart_rates") for k in range(n)], NOW - timedelta(minutes=1))
+    st.upsert_observations([Obs("sleep_duration", NOW - timedelta(hours=3), "period_end", value_num=27000, period="night", period_date=date(2026, 10, 21), source_tool="get_sleep_summary")], NOW - timedelta(minutes=1))
+
+
+def test_max_points_thins_samples_evenly_keeps_first_and_last_and_never_changes_a_value():
+    c, st = make()
+    _many_hr(st)
+    base = f"{PREFIX}/metrics/history?metrics=heart_rate&from=2026-10-20T20:00:00Z&to=2026-10-21T09:00:00Z&limit=2000"
+    full = c.get(base, headers=H).json()
+    thin = c.get(base + "&max_points=50", headers=H).json()
+    assert full["count"] == 300 and full["thinned"] is False
+    assert thin["count"] == 50 and thin["thinned"] is True
+    ft = [o["measured_at"] for o in full["observations"]]
+    tt = [o["measured_at"] for o in thin["observations"]]
+    assert tt[0] == ft[0] and tt[-1] == ft[-1] and tt == sorted(tt) and set(tt) <= set(ft)
+    by_time = {o["measured_at"]: o["value"] for o in full["observations"]}
+    assert all(by_time[o["measured_at"]] == o["value"] for o in thin["observations"])      # the same stored values, nothing averaged
+
+
+def test_max_points_does_not_thin_small_series_events_or_daily_summaries():
+    c, st = make()
+    _many_hr(st, 40)
+    q = f"{PREFIX}/metrics/history?metrics=heart_rate,sleep_duration&from=2026-10-20T00:00:00Z&to=2026-10-21T09:00:00Z&limit=2000&max_points=50"
+    j = c.get(q, headers=H).json()
+    assert j["thinned"] is False and sum(1 for o in j["observations"] if o["metric"] == "heart_rate") == 40
+    assert sum(1 for o in j["observations"] if o["metric"] == "sleep_duration") == 1
+
+
+@pytest.mark.parametrize("v", ["5", "5000", "abc", "-3"])
+def test_invalid_max_points_is_a_400(v):
+    c, _ = make()
+    r = c.get(f"{PREFIX}/metrics/history?metrics=heart_rate&max_points={v}", headers=H)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_parameter"

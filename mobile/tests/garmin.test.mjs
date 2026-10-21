@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fetchHistory, fetchLatest, fetchStatus, garminErrorText, parseLatest } from '../src/api/garminContract.ts';
 import { buildWearableFromGarmin, syncNotice } from '../src/services/garminAdapter.ts';
-import { loadGarmin } from '../src/services/garminLoad.ts';
+import { CHART_POINTS, EMPTY_HISTORY, HISTORY_TIMEOUT_MS, loadGarmin, loadGarminFast, loadHistoryBundle } from '../src/services/garminLoad.ts';
 import { formatTime12 } from '../src/services/clock12.ts';
 import { freshnessOf, summaryOf } from '../src/services/wearableModel.ts';
 
@@ -265,6 +265,63 @@ test('loader: a failed /metrics/latest is a typed error, never data', async () =
   const f = fake((url) => (url.includes('/metrics/latest') ? res({}, 401) : res(statusBody())));
   const r = await loadGarmin(cfg(f), NOW, { history: { heartRate: [], stepsToday: [], stressBattery: [], daily: [], exercises: [] }, at: NOW });
   assert.deepEqual([r.ok, r.error], [false, 'unauthorized']);
+});
+
+/* ------------------------------------------------------------ fast first, thinned history, longer history timeout */
+
+test('fast load: only latest + status (two small calls), so the screen can show values before the history arrives', async () => {
+  const urls = [];
+  const f = fake((url) => {
+    urls.push(url);
+    return url.includes('/metrics/latest') ? res(latestBody()) : res(statusBody());
+  });
+  const r = await loadGarminFast(cfg(f));
+  assert.equal(r.ok, true);
+  assert.equal(urls.length, 2);
+  assert.ok(urls.every((u) => !u.includes('/metrics/history')));
+  assert.equal(r.status !== null, true);
+  const failed = await loadGarminFast(cfg(fake((url) => (url.includes('/metrics/latest') ? res({}, 401) : res(statusBody())))));
+  assert.deepEqual([failed.ok, failed.error], [false, 'unauthorized']);
+  const noStatus = await loadGarminFast(cfg(fake((url) => (url.includes('/metrics/latest') ? res(latestBody()) : res({}, 500)))));
+  assert.equal(noStatus.ok, true);
+  assert.equal(noStatus.status, null, 'status is optional');
+});
+
+test('history: the long series ask the server to thin them, the short ones do not; the empty bundle is empty arrays', async () => {
+  const urls = [];
+  const f = fake((url) => {
+    urls.push(url);
+    return res({ count: 0, limit: 500, has_more: false, next_cursor: null, observations: [] });
+  });
+  const r = await loadHistoryBundle(cfg(f), NOW);
+  assert.equal(r.ok, true);
+  const q = (needle) => urls.filter((u) => u.includes(needle));
+  assert.ok(q('metrics=heart_rate')[0].includes(`max_points=${CHART_POINTS}`));
+  assert.ok(q('stress_level')[0].includes(`max_points=${CHART_POINTS}`));
+  assert.ok(!q('steps_interval')[0].includes('max_points') && !q('resting_heart_rate')[0].includes('max_points') && !q('exercise_session')[0].includes('max_points'));
+  assert.deepEqual(Object.keys(EMPTY_HISTORY).sort(), ['daily', 'exercises', 'heartRate', 'stepsToday', 'stressBattery']);
+  assert.ok(EMPTY_HISTORY.heartRate.length === 0);
+});
+
+test('history: gets a longer timeout than the default, and an explicit timeout is still respected', async () => {
+  assert.ok(HISTORY_TIMEOUT_MS > 10_000);
+  const hang = fake(() => new Promise(() => {}));
+  const slowImpl = (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  const r = await loadHistoryBundle({ baseUrl: 'https://h.test/api/garmin/v1', token: 'tok', fetchImpl: slowImpl, sleep: async () => {}, timeoutMs: 30 }, NOW);
+  assert.deepEqual([r.ok, r.error], [false, 'timeout']);
+  void hang;
+});
+
+test('fetchHistory sends max_points only when asked', async () => {
+  const urls = [];
+  const f = fake((url) => {
+    urls.push(url);
+    return res({ count: 0, limit: 500, has_more: false, next_cursor: null, observations: [] });
+  });
+  await fetchHistory(cfg(f), { metrics: ['heart_rate'], from: iso(-60), to: iso(0) });
+  await fetchHistory(cfg(f), { metrics: ['heart_rate'], from: iso(-60), to: iso(0), maxPoints: 100 });
+  assert.ok(!urls[0].includes('max_points'));
+  assert.ok(urls[1].includes('max_points=100'));
 });
 
 /* ------------------------------------------------------------ UTC -> local (DST) */
