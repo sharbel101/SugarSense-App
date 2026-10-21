@@ -161,7 +161,9 @@ class Pipeline(unittest.TestCase):
         self.assertTrue(ev["pattern_id"].startswith("forecast_bias:"))
         self.assertIn("level_criteria", ev)
         self.assertEqual(card[0]["content"]["headline"], "How your forecasts have been doing")
-        self.assertEqual(card[0]["validation_status"], "valid")
+        self.assertEqual(card[0]["validation_status"], "not_applicable")            # fixed Python wording: the model never writes this card
+        self.assertNotIn("of 180", card[0]["content"]["paragraph"])
+        self.assertIn("In 15 of those periods", card[0]["content"]["paragraph"])
 
     def test_every_card_gets_a_level(self):
         r = self._go([], flag=True)

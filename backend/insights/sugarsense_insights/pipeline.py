@@ -184,6 +184,8 @@ def rules_reasoning(c: Candidate) -> str:
 
 def rules_safety(c: Candidate) -> str:
     """Python's own safety text: what the insight cannot tell the reader, and who decides insulin questions."""
+    if c.category == "forecast_performance":
+        return "This describes how well past forecasts matched recorded glucose. It is not an alert, a diagnosis or a dose, and it does not show why a forecast differed. Anything about insulin is for your care team to decide."
     if c.python_only:
         return "This is a rough estimate from your logged records. It is not an alert, a diagnosis or a dose, and it cannot see food or insulin that was not logged. If you feel low, follow your care team's plan."
     s = "This describes your recorded data and cannot show what caused it."

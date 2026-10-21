@@ -123,5 +123,5 @@ def _candidate(snap: Snapshot, ver: str, h: int, rows: list[ScoredForecast], blo
         boundaries=[ASSOC, "This is about how accurate the forecast has been, not about your glucose control. The forecast is not an alert and is never used to calculate a dose."],
         limitations=limits, coverage=1.0, method=f"sign test over {BLOCK_HOURS}-hour comparison periods of forecast error (recorded minus forecast), corrected for the number of horizons judged, {g.reason}",
         scores={"safety": 0.5 if risky else 0.35, "evidence": 0.9 if g.level == EV.VALIDATED else 0.6, "recurrence": 0.8, "relevance": 0.7, "actionability": 0.3},
-        suggestions=[M.LOG_CONTEXT], evidence_level=g.level, pattern_id=f"forecast_bias:{ver}:{h}:{word}",
+        suggestions=[M.LOG_CONTEXT], python_only=True, evidence_level=g.level, pattern_id=f"forecast_bias:{ver}:{h}:{word}",
     )
