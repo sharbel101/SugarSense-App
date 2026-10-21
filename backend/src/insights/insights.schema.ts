@@ -32,6 +32,9 @@ export const storedEvidenceSchema = z.object({
   coverage: z.number().min(0).max(1).optional(),
   method: z.string().max(300).optional(),
   quality_flags: z.array(z.string()).max(12).default([]),
+  level: z.enum(['descriptive', 'exploratory', 'repeated', 'validated']).optional(),
+  pattern_id: z.string().max(120).optional(),
+  level_criteria: z.string().max(300).optional(),
 });
 
 export const INSIGHT_NOTICE =
@@ -67,7 +70,7 @@ export interface InsightItem {
   /** 'valid' = model explanation present and validated; 'fallback' = Python text only; 'not_applicable' = availability summary. */
   validation: 'valid' | 'fallback' | 'not_applicable';
   evidenceRefs: string[];
-  evidence: { coverage: number | null; method: string | null; qualityFlags: string[]; facts: { ref: string; name: string; value: number | string; unit: string; kind: string }[] };
+  evidence: { coverage: number | null; method: string | null; level: 'descriptive' | 'exploratory' | 'repeated' | 'validated' | null; patternId: string | null; levelCriteria: string | null; qualityFlags: string[]; facts: { ref: string; name: string; value: number | string; unit: string; kind: string }[] };
   contentVersion: number;
 }
 

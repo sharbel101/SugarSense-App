@@ -18,6 +18,8 @@ from . import awareness as A
 from . import episodes as E
 from . import reasoning as R
 from . import patterns as P
+from . import performance as PERF
+from . import evidence as EV
 from .config import ENGINE_VERSION, PROMPT_VERSION, Weights
 from .llm import Explainer, candidate_payload
 from .models import Candidate, Snapshot, SnapshotSource
@@ -49,6 +51,15 @@ def run_key_for(kind: str, snap: Snapshot) -> str:
     if kind == "event":
         return f"event:{d}:{int(snap.now.timestamp() // 900)}"   # one event run per 15-minute bucket
     return f"{kind}:{d}:v{ENGINE_VERSION.rsplit('-', 1)[-1]}"   # a new engine version writes today's briefing again instead of being skipped as already done
+
+
+def forecast_performance_enabled() -> bool:
+    """Feature flag (default OFF): the forecast-performance insight is shown only when INSIGHTS_FORECAST_PERFORMANCE=1. Shadow-evaluate with persist=False first."""
+    return os.environ.get("INSIGHTS_FORECAST_PERFORMANCE") == "1"
+
+
+def _perf(snap: Snapshot):
+    return PERF.forecast_performance(snap) if forecast_performance_enabled() else None
 
 
 def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Availability]) -> tuple[list[Candidate], dict[str, list[str]]]:
@@ -98,6 +109,7 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
             add(P.meal_response_recurring(snap, clean, d))
             add(P.exercise_association(snap, clean))
             add(P.insulin_timing_association(snap, clean))
+            add(_perf(snap))
         add(E.episode_time_pattern(snap, clean, d, kind))
         add(A.frequent_lows(snap, clean, flags, d))
         add(P.data_quality(snap, clean, flags, kind))
@@ -129,6 +141,7 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
         add(P.meal_response_recurring(snap, clean, d))
         add(P.exercise_association(snap, clean))
         add(P.insulin_timing_association(snap, clean))
+        add(_perf(snap))
         add(P.data_quality(snap, clean, flags, "evening"))
         if not av["history"].ok:
             why["recurring patterns"] = list(av["history"].reasons)
@@ -338,7 +351,7 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
                 "supersedes_insight_id": d.supersedes, "observation_start": c.window[0], "observation_end": c.window[1], "priority": c.priority,
                 "validation_status": c.validation_status, "created_at": now, "expires_at": now + timedelta(hours=ttl),
                 "evidence": {"facts": [{"ref": f.ref, "name": f.name, "value": f.value, "unit": f.unit, "kind": f.kind} for f in c.facts], "coverage": round(c.coverage, 3),
-                             "quality_flags": c.quality_flags, "method": c.method, "boundaries": c.boundaries, "window": [c.window[0].isoformat(), c.window[1].isoformat()]},
+                             "quality_flags": c.quality_flags, "method": c.method, "level": c.evidence_level or EV.default_level(c.category), "pattern_id": c.pattern_id or c.key, "level_criteria": EV.CRITERIA[c.evidence_level or EV.default_level(c.category)], "boundaries": c.boundaries, "window": [c.window[0].isoformat(), c.window[1].isoformat()]},
                 "content": render(c),
             }
             rec["evidence_facts"] = [[f.name, f.value, f.unit] for f in c.facts]

@@ -142,3 +142,19 @@ the forecast or backend degrades. See `BENCHMARK.md` for the measured numbers. S
 - `morning rise` and `meal response` definitions are simple windows, not clinical definitions; thresholds are defaults to be reviewed against the user's prescribed targets.
 - DST: local windows use zoneinfo (tested for the November fall-back night); an unknown timezone name falls back to UTC rather than guessing.
 - Event detection polls every 15 min; very short events can be missed. This is deliberate: it is not an alerting channel.
+
+## 10. Evidence levels and the forecast-performance insight (engine 0.4.0)
+
+Every stored insight now carries `evidence.level`, `evidence.pattern_id` and `evidence.level_criteria` (exposed by `GET /insights` as `evidence.level`, `patternId`, `levelCriteria`; older rows have null).
+Levels (`evidence.py`, assigned by Python only): `descriptive` (a direct report of records, no inference), `exploratory` (a signal below the repeated criteria: never shown, logged), `repeated`
+(>= 3 days, exact sign test on independent comparison blocks with Bonferroni correction over the hypotheses tested, effect above a material size) and `validated` (repeated AND the effect has the same direction
+and a material size in both halves of the period; an in-sample time split, not clinical validation). Existing pattern detectors keep their own documented thresholds and are labelled `repeated`; other cards `descriptive`.
+
+`performance.py` adds `forecast_performance`: past forecasts (`predictions` joined to `prediction_outcomes`, matched readings only, target time already passed) of the CURRENT non-shadow model version are
+collapsed to one median error per (day, 3-hour block) before testing, so neighbouring forecasts are not counted as independent. One horizon (30/60/120/180 min) is reported at most, the one with the largest material effect.
+Wording is fixed in Python (counts, median difference, the interval's own coverage) and states that this is about forecast accuracy, not glucose control. **Feature flag, default off:** set
+`INSIGHTS_FORECAST_PERFORMANCE=1` in the engine's environment to enable; unset to roll back (no data migration involved). Shadow run on 2026-10-21 (read-only, real data, no model call): flag off -> 5 cards,
+flag on -> the new card replaced the lowest-ranked one (cap 5); it reported that 180-minute forecasts were lower than the later recorded glucose in 16 of 18 periods over 5 days, median 59 mg/dL (level validated).
+
+Not implemented (needs data that does not exist yet or a separate study): exercise/sleep/wearable associations beyond the existing gated detectors (one night of Garmin data so far), wearable ablation testing,
+a hypoglycaemia-risk card combining wearable signals, and attribution of an accuracy change to a model update. These stay silent rather than guessing.

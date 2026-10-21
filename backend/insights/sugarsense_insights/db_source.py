@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .config import thresholds_for
-from .models import (Activity, ForecastPoint, Insulin, Meal, Reading, Sleep, Snapshot, UserSettings, WearableSample)
+from .models import (Activity, ForecastPoint, Insulin, Meal, Reading, ScoredForecast, Sleep, Snapshot, UserSettings, WearableSample)
 
 
 def _f(x: Any) -> Optional[float]:
@@ -70,7 +70,16 @@ class PgSource:
                     therapy["morning_resistance"] = bool(tp[0])
             except Exception:
                 therapy = {}
-        return Snapshot(settings, now, readings, meals, insulin, acts, sleeps, wear, fc, therapy)
+            scored: list[ScoredForecast] = []
+            try:   # forecasts matched to what was recorded later; a missing table = no performance insight, nothing else changes
+                for r in c.execute(
+                        """SELECT p.anchor_at, p.horizon_min, p.model_version, p.predicted_mgdl, o.observed_mgdl, p.lower_mgdl, p.upper_mgdl, p.interval_level, o.matching_quality
+                           FROM predictions p JOIN prediction_outcomes o USING (prediction_id)
+                           WHERE p.user_id=%s AND p.anchor_at >= %s AND p.anchor_at <= %s ORDER BY p.anchor_at""", (user_id, now - timedelta(days=14), now)).fetchall():
+                    scored.append(ScoredForecast(r[0], int(r[1]), r[2], float(r[3]), float(r[4]), float(r[5]), float(r[6]), float(r[7]), r[8]))
+            except Exception:
+                scored = []
+        return Snapshot(settings, now, readings, meals, insulin, acts, sleeps, wear, fc, therapy, scored)
 
 
 # Garmin metrics are polled and stored by garmin-service (migration 0011); the engine only READS what is already stored and never calls Garmin.

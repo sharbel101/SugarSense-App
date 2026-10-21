@@ -26,6 +26,7 @@ HEADLINES = {
     "post_activity_low": "A low after activity",
     "heading_low": "Glucose may be heading low",
     "frequent_lows": "Lows keep coming back",
+    "forecast_performance": "How your forecasts have been doing",
 }
 
 

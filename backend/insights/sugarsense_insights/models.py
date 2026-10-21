@@ -79,6 +79,29 @@ class ForecastPoint:
 
 
 @dataclass(frozen=True)
+class ScoredForecast:
+    """A stored forecast matched to the glucose reading recorded at its target time (prediction_outcomes). Error = observed minus predicted:
+    positive means the forecast was LOWER than what was later recorded."""
+    anchor: datetime
+    horizon_min: int
+    model_version: str
+    predicted_mgdl: float
+    observed_mgdl: float
+    lower_mgdl: float
+    upper_mgdl: float
+    interval_level: float
+    match_quality: str               # exact | nearest_within_tolerance | interpolated
+
+    @property
+    def error(self) -> float:
+        return self.observed_mgdl - self.predicted_mgdl
+
+    @property
+    def inside(self) -> bool:
+        return self.lower_mgdl <= self.observed_mgdl <= self.upper_mgdl
+
+
+@dataclass(frozen=True)
 class UserSettings:
     user_id: str
     timezone: str                    # IANA
@@ -97,6 +120,7 @@ class Snapshot:
     wearables: list[WearableSample] = field(default_factory=list)
     forecast: list[ForecastPoint] = field(default_factory=list)
     therapy: dict[str, Any] = field(default_factory=dict)       # user-entered settings that exist (e.g. morning_resistance: bool); empty = unknown
+    scored: list[ScoredForecast] = field(default_factory=list)  # past forecasts matched to what was recorded later (forecast-performance insight)
 
 
 class SnapshotSource(Protocol):
@@ -159,6 +183,8 @@ class Candidate:
     suggestions_used: list[str] = field(default_factory=list)
     validation_status: str = "not_applicable"
     facts_hash: str = ""
+    evidence_level: Optional[str] = None       # descriptive | exploratory | repeated | validated (see evidence.py); filled by the detector or by the pipeline default
+    pattern_id: Optional[str] = None           # stable id of the pattern (not of one occurrence); used for deduplication across runs
 
     def fact(self, ref: str) -> Optional[Fact]:
         return next((f for f in self.facts if f.ref == ref), None)

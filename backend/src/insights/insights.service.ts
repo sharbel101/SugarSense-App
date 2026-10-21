@@ -112,6 +112,9 @@ function toItem(r: InsightRow): InsightItem | null {
     evidence: {
       coverage: 'coverage' in ev && typeof ev.coverage === 'number' ? ev.coverage : null,
       method: 'method' in ev && typeof ev.method === 'string' ? ev.method : null,
+      level: 'level' in ev && ev.level ? ev.level : null,
+      patternId: 'pattern_id' in ev && ev.pattern_id ? ev.pattern_id : null,
+      levelCriteria: 'level_criteria' in ev && ev.level_criteria ? ev.level_criteria : null,
       qualityFlags: ev.quality_flags,
       facts: ev.facts,
     },
