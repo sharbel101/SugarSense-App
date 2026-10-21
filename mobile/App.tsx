@@ -15,6 +15,7 @@ import { EventsProvider } from './src/services/EventsProvider';
 import { ForecastProvider } from './src/services/ForecastProvider';
 import { GlucoseProvider } from './src/services/GlucoseProvider';
 import { InsightsProvider } from './src/services/InsightsProvider';
+import { WearableProvider } from './src/services/WearableProvider';
 import { RiskAlertsProvider } from './src/services/RiskAlertsProvider';
 import { startWebUpdateWatcher } from './src/services/webUpdate';
 import { ThemeProvider, useTheme } from './src/theme';
@@ -58,9 +59,11 @@ export default function App() {
             <RiskAlertsProvider>
               <EventsProvider>
                 <InsightsProvider>
-                  <QuickAddProvider>
-                    <RootNavigator />
-                  </QuickAddProvider>
+                  <WearableProvider>
+                    <QuickAddProvider>
+                      <RootNavigator />
+                    </QuickAddProvider>
+                  </WearableProvider>
                 </InsightsProvider>
               </EventsProvider>
             </RiskAlertsProvider>

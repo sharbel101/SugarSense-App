@@ -6,7 +6,9 @@
  * `null`/absent, never 0 and never interpolated; status is always relative to the person's OWN history and
  * only once enough history exists; the wearable never measures glucose and nothing here is a score.
  */
-export type MetricKey = 'heartRate' | 'restingHr' | 'hrv' | 'sleep' | 'steps' | 'spo2' | 'respiratory' | 'skinTemp' | 'battery';
+import { formatTime12 } from './clock12.ts';
+
+export type MetricKey = 'heartRate' | 'restingHr' | 'hrv' | 'sleep' | 'steps' | 'spo2' | 'respiratory' | 'skinTemp' | 'battery' | 'stress' | 'bodyBattery';
 export type RangeKey = 'day' | 'week' | 'month';
 /** One measurement: `t` = epoch ms, `v` in the metric's unit. */
 export type Sample = { t: number; v: number };
@@ -89,6 +91,22 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     kind: 'daily',
     about: 'Change in skin temperature from your own usual level. It is not a body temperature.',
   },
+  stress: {
+    key: 'stress',
+    label: 'Stress',
+    unit: '/ 100',
+    decimals: 0,
+    kind: 'instant',
+    about: 'Garmin’s stress score (0 to 100), calculated by Garmin from heart-rate variability. It is not a glucose signal.',
+  },
+  bodyBattery: {
+    key: 'bodyBattery',
+    label: 'Body battery',
+    unit: '/ 100',
+    decimals: 0,
+    kind: 'instant',
+    about: 'Garmin’s energy estimate (0 to 100), calculated by Garmin from heart-rate variability, stress, sleep and activity.',
+  },
   battery: {
     key: 'battery',
     label: 'Battery',
@@ -100,14 +118,28 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
 };
 
 /** What a data source must provide. Missing metrics are simply absent (never zero-filled). */
+export type SyncNotice = { kind: 'waiting' | 'not_updating'; text: string; reason: string | null };
+export type Exercise = { t: number; durationMin: number; type: string | null; distanceM: number | null; avgHr: number | null };
+
 export interface WearableData {
   isDemo: boolean;
+  source: 'demo' | 'garmin';
+  /** Server time minus device time when the data was read; add to `Date.now()` so ages do not depend on the phone clock. */
+  clockOffsetMs: number;
+  /** Length of one steps bar: one hour in the demo, 15 minutes from Garmin. */
+  stepsSlotMs: number;
+  sleepScore: number | null;
+  exercises: Exercise[];
+  /** Metrics the source says were calculated by the vendor (shown as "Calculated by Garmin"). */
+  derived: Partial<Record<MetricKey, boolean>>;
+  /** Why data may look old: waiting for the watch to sync, or the pipeline itself is not updating. */
+  sync: SyncNotice | null;
   /** `null` = no device connected. */
   device: string | null;
   fetchedAt: number;
   series: Partial<Record<MetricKey, Sample[]>>;
-  /** Steps counted in each hour of today (`t` = start of the hour). */
-  hourlySteps: Sample[];
+  /** Steps counted in each slot of today (`t` = slot start; slot length is `stepsSlotMs`). */
+  stepBars: Sample[];
   activeMinutes: number | null;
   /** Last night's stage minutes, when the device reports stages. */
   lastNight: { totalMin: number; deepMin: number; remMin: number; lightMin: number; awakeMin: number } | null;
@@ -146,12 +178,13 @@ export function freshnessOf(measuredAt: number | null, now: number, kind: 'insta
   if (measuredAt === null || !Number.isFinite(measuredAt)) return { state: 'none', text: 'No measurement yet', ageMin: null };
   const ageMin = Math.max(0, (now - measuredAt) / 60_000);
   const at = ageText(ageMin);
+  const when = `${formatTime12(new Date(measuredAt))} (${at})`;
   if (kind === 'daily') {
-    return ageMin <= FRESH_DAILY_MIN ? { state: 'fresh', text: `Updated ${at}`, ageMin } : { state: 'stale', text: `Stale · last ${at}`, ageMin };
+    return ageMin <= FRESH_DAILY_MIN ? { state: 'fresh', text: `Measured ${when}`, ageMin } : { state: 'stale', text: `Stale · measured ${when}`, ageMin };
   }
-  if (ageMin <= FRESH_INSTANT_MIN) return { state: 'fresh', text: `Updated ${at}`, ageMin };
-  if (ageMin <= DELAYED_INSTANT_MIN) return { state: 'delayed', text: `Data delayed · last ${at}`, ageMin };
-  return { state: 'stale', text: `Stale · last ${at}`, ageMin };
+  if (ageMin <= FRESH_INSTANT_MIN) return { state: 'fresh', text: `Measured ${when}`, ageMin };
+  if (ageMin <= DELAYED_INSTANT_MIN) return { state: 'delayed', text: `Data delayed · measured ${when}`, ageMin };
+  return { state: 'stale', text: `Stale · measured ${when}`, ageMin };
 }
 
 /* ----------------------------------------------------------------- baseline */
@@ -403,4 +436,40 @@ export function hasGap(samples: Sample[], gapMs: number): boolean {
   const s = sorted(samples);
   for (let i = 1; i < s.length; i++) if (s[i].t - s[i - 1].t > gapMs) return true;
   return false;
+}
+
+/* -------------------------------------------------------------------- gauges */
+
+export interface UsualGauge {
+  /** Needle position, 0 (far below usual) to 1 (far above usual). */
+  fraction: number;
+  /** The person's usual range as a slice of the same 0..1 scale. */
+  usualFrom: number;
+  usualTo: number;
+  zone: 'below' | 'within' | 'above';
+}
+
+/**
+ * Where a value sits against the person's OWN usual range. The scale spans three usual half-widths either side of
+ * the median, so the usual range is the middle third. It says "below / within / above your usual", never
+ * "good" or "bad": what a deviation means is for the person and their clinician.
+ */
+export function usualGauge(value: number, b: Baseline): UsualGauge {
+  const half = Math.max((b.high - b.low) / 2, 1e-6);
+  const lo = b.median - 3 * half;
+  const hi = b.median + 3 * half;
+  const f = (v: number) => Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+  return { fraction: f(value), usualFrom: f(b.low), usualTo: f(b.high), zone: value < b.low ? 'below' : value > b.high ? 'above' : 'within' };
+}
+
+/** Garmin's own stress ranges (calculated by Garmin; shown with that label). */
+export const STRESS_BANDS = [
+  { key: 'rest', label: 'Rest', from: 0, to: 25 },
+  { key: 'low', label: 'Low', from: 25, to: 50 },
+  { key: 'medium', label: 'Medium', from: 50, to: 75 },
+  { key: 'high', label: 'High', from: 75, to: 100 },
+] as const;
+
+export function stressBand(v: number): (typeof STRESS_BANDS)[number] {
+  return STRESS_BANDS.find((b) => v <= b.to) ?? STRESS_BANDS[3];
 }

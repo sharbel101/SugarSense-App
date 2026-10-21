@@ -12,7 +12,7 @@ const daily = (vals) => vals.map((v, i) => day(vals.length - 1 - i, v));
 
 test('freshness comes from the measurement time: fresh, delayed, stale, none', () => {
   assert.equal(freshnessOf(NOW - 4 * 60_000, NOW, 'instant').state, 'fresh');
-  assert.equal(freshnessOf(NOW - 4 * 60_000, NOW, 'instant').text, 'Updated 4 min ago');
+  assert.match(freshnessOf(NOW - 4 * 60_000, NOW, 'instant').text, /^Measured \d{1,2}:\d{2} (AM|PM) \(4 min ago\)$/);
   const d = freshnessOf(NOW - 45 * 60_000, NOW, 'instant');
   assert.equal(d.state, 'delayed');
   assert.match(d.text, /^Data delayed/);
@@ -132,4 +132,22 @@ test('summaryOf: status only for daily metrics with a baseline; heart rate and s
   assert.equal(hasGap(d.series.heartRate, 30 * 60_000), true);
   assert.deepEqual(minMax([{ t: 0, v: 2 }, { t: 1, v: 4 }]), { min: 2, max: 4, mean: 3 });
   assert.equal(minMax([]), null);
+});
+
+test('usual gauge: the usual range is the middle third; zone says below / within / above, never good or bad', async () => {
+  const { usualGauge, stressBand } = await import('../src/services/wearableModel.ts');
+  const b = { low: 40, high: 56, median: 48, n: 10 };
+  const mid = usualGauge(48, b);
+  assert.ok(Math.abs(mid.fraction - 0.5) < 1e-9);
+  assert.ok(Math.abs(mid.usualFrom - 1 / 3) < 1e-9 && Math.abs(mid.usualTo - 2 / 3) < 1e-9);
+  assert.equal(mid.zone, 'within');
+  assert.equal(usualGauge(70, b).zone, 'above');
+  assert.equal(usualGauge(20, b).zone, 'below');
+  assert.equal(usualGauge(1000, b).fraction, 1, 'clamped');
+  assert.equal(usualGauge(-1000, b).fraction, 0);
+  assert.equal(stressBand(10).label, 'Rest');
+  assert.equal(stressBand(25).label, 'Rest');
+  assert.equal(stressBand(26).label, 'Low');
+  assert.equal(stressBand(60).label, 'Medium');
+  assert.equal(stressBand(99).label, 'High');
 });

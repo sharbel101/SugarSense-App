@@ -1,5 +1,7 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { SecondaryButton } from '../Buttons';
+import { Card } from '../Card';
 import { Icon, type IconName } from '../Icon';
 import { STATUS_TEXT, type Freshness, type Status } from '../../services/wearableModel';
 import { radius, touch, useColors } from '../../theme';
@@ -28,13 +30,16 @@ export function StatusChip({ status }: { status: Status }) {
 }
 
 /** "Updated 4 min ago" / "Data delayed · last 45 min ago" / "Stale · last 5 h ago". */
-export function FreshnessLine({ f }: { f: Freshness }) {
+export function FreshnessLine({ f, derived }: { f: Freshness; derived?: boolean }) {
   const colors = useColors();
   const warn = f.state === 'delayed' || f.state === 'stale';
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       {warn ? <Icon name="alertTriangle" size={13} color={colors.amberDark} /> : null}
-      <Text style={{ fontFamily: warn ? 'Manrope_700Bold' : 'Manrope_500Medium', fontSize: 13, color: warn ? colors.amberDark : colors.ink3 }}>{f.text}</Text>
+      <Text style={{ fontFamily: warn ? 'Manrope_700Bold' : 'Manrope_500Medium', fontSize: 13, color: warn ? colors.amberDark : colors.ink3, flexShrink: 1 }}>
+        {f.text}
+        {derived ? ' · Calculated by Garmin' : ''}
+      </Text>
     </View>
   );
 }
@@ -66,12 +71,15 @@ export function MetricRow({
   unit,
   status,
   onPress,
+  extra,
 }: {
   label: string;
   value: string;
   unit: string;
   status: Status;
   onPress?: () => void;
+  /** Optional element under the status (e.g. a range bar). */
+  extra?: React.ReactNode;
 }) {
   const colors = useColors();
   const body = (
@@ -79,6 +87,7 @@ export function MetricRow({
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink2 }}>{label}</Text>
         <StatusChip status={status} />
+        {extra}
       </View>
       <Text style={{ fontFamily: 'Manrope_800ExtraBold', fontSize: 20, color: colors.ink }}>
         {value}
@@ -92,5 +101,47 @@ export function MetricRow({
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${label} ${value} ${unit}. ${STATUS_TEXT[status]}. Open details`} style={({ pressed }) => (pressed ? { opacity: 0.8 } : null)}>
       {body}
     </Pressable>
+  );
+}
+
+/** Why the numbers may look old: waiting for the watch, or the pipeline is not updating. Text + icon, never colour alone. */
+export function SyncBanner({ notice }: { notice: { kind: 'waiting' | 'not_updating'; text: string; reason: string | null } }) {
+  const colors = useColors();
+  const bad = notice.kind === 'not_updating';
+  return (
+    <View
+      accessibilityRole="alert"
+      style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: bad ? colors.amber100 : colors.divider, borderRadius: radius.row, padding: 12 }}
+    >
+      <Icon name={bad ? 'alertTriangle' : 'refresh'} size={18} color={bad ? colors.amberDark : colors.ink2} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: bad ? colors.amberDark : colors.ink }}>{notice.text}</Text>
+        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: bad ? colors.amberDark : colors.ink2, lineHeight: 19, marginTop: 2 }}>
+          {bad
+            ? `${notice.reason ? notice.reason.charAt(0).toUpperCase() + notice.reason.slice(1) + '. ' : ''}The values below are the last ones received.`
+            : 'Your watch sends data in batches, so values can be up to a few hours old. These are the last ones received.'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** Loading / error / empty card with an optional retry. */
+export function StateMessage({ title, text, onRetry, busy }: { title: string; text: string; onRetry?: () => void; busy?: boolean }) {
+  const colors = useColors();
+  return (
+    <Card>
+      <View aria-busy={busy} style={{ gap: 6 }}>
+        <Text accessibilityRole="header" style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+          {title}
+        </Text>
+        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 21 }}>{text}</Text>
+        {onRetry ? (
+          <View style={{ marginTop: 8 }}>
+            <SecondaryButton label={busy ? 'Retrying…' : 'Retry'} onPress={onRetry} disabled={busy} />
+          </View>
+        ) : null}
+      </View>
+    </Card>
   );
 }

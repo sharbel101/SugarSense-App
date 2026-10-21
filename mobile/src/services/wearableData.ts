@@ -62,21 +62,21 @@ export function buildDemoData(now: number): WearableData {
   series.skinTemp = daily(0, 0.4, 6, 1);
 
   // Steps: yesterday and earlier are final totals; today is a running total (hourly counts below).
-  const hourlySteps: Sample[] = [];
+  const stepBars: Sample[] = [];
   const hourNow = new Date(now).getHours();
   let sum = 0;
   for (let h = 6; h <= hourNow; h++) {
     const peak = h === 8 || h === 13 || h === 18 ? 900 : 250;
     const v = Math.round(peak * (0.4 + rand(h + 40) * 0.8));
     sum += v;
-    hourlySteps.push({ t: today + h * HOUR, v });
+    stepBars.push({ t: today + h * HOUR, v });
   }
   const steps: Sample[] = [];
   for (let d = 29; d >= 1; d--) {
     if (missing.has(d)) continue;
     steps.push({ t: today - d * DAY + 23 * HOUR, v: Math.round(4000 + rand(d + 90) * 7000) });
   }
-  if (hourlySteps.length > 0) steps.push({ t: now - 3 * 60_000, v: sum });
+  if (stepBars.length > 0) steps.push({ t: now - 3 * 60_000, v: sum });
   series.steps = steps;
 
   series.battery = [{ t: now - 4 * 60_000, v: 78 }];
@@ -90,10 +90,17 @@ export function buildDemoData(now: number): WearableData {
 
   return {
     isDemo: true,
+    source: 'demo',
+    clockOffsetMs: 0,
+    stepsSlotMs: HOUR,
+    sleepScore: null,
+    exercises: [],
+    derived: {},
+    sync: null,
     device: null,
     fetchedAt: now,
     series,
-    hourlySteps,
+    stepBars,
     activeMinutes: 38,
     lastNight,
   };
