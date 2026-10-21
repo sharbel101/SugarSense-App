@@ -138,3 +138,18 @@ test('provenance: AI total kept beside the user value', () => {
   assert.equal(ev.aiCarbsG, 48);
   assert.equal(ev.source, 'gemini_edited');
 });
+
+test('absorption options: three choices with emoji and hint, stored values unchanged, nothing chosen sends nothing', async () => {
+  const { ABSORPTION_OPTIONS, ABSORPTION_NOTE } = await import('../src/services/events.ts');
+  assert.deepEqual(
+    ABSORPTION_OPTIONS.map((o) => [o.value, o.label, o.hint]),
+    [
+      ['fast', '\u{1F36C} Fast', 'candy, juice, sweets'],
+      ['medium', '\u{1F371} Medium', 'balanced meals'],
+      ['slow', '\u{1F355} Slow', 'pizza, burgers, fatty meals'],
+    ],
+  );
+  assert.equal(ABSORPTION_NOTE, 'Slow means the carbs reach your blood more gradually.');
+  assert.equal(validateMeal(mealIn({ absorption: 'unset' }), NOW).value.absorptionClass, null, 'unset: the model guess is used');
+  for (const v of ['fast', 'medium', 'slow']) assert.equal(validateMeal(mealIn({ absorption: v }), NOW).value.absorptionClass, v);
+});

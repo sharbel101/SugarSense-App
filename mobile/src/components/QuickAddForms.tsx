@@ -4,7 +4,6 @@ import { goToInsulinSettings } from '../navigation/navigationRef';
 import { apiContext } from '../api/apiContext';
 import { getTherapySettings } from '../api/therapyApi';
 import {
-  ABSORPTION_OPTIONS,
   buildInsulinEvent,
   buildMealEvent,
   buildNoInsulinEvent,
@@ -26,7 +25,7 @@ import { useEvents } from '../services/EventsProvider';
 import { mealChoices, type MealRef } from '../services/mealRefs';
 import { radius, touch, useColors } from '../theme';
 import { PrimaryButton, SecondaryButton } from './Buttons';
-import { CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
+import { AbsorptionChoice, CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
 import { ResultBanner, useRecord } from './EventResult';
 import { Icon } from './Icon';
 import { DoseConfirmCard } from './DoseConfirmCard';
@@ -180,7 +179,7 @@ export function MealForm({ onDone, onBack, onPhoto }: { onDone: () => void; onBa
             <CheckRow checked={approximate} onChange={setApproximate} label="The time is approximate" />
             <View style={{ gap: 8 }}>
               <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>How fast does it hit?</Text>
-              <ChoiceChips options={ABSORPTION_OPTIONS} value={absorption} onChange={setAbsorption} />
+              <AbsorptionChoice value={absorption} onChange={setAbsorption} />
             </View>
             <FormField label="Fat" value={fat} onChangeText={setFat} unit="g" keyboardType="decimal-pad" error={errors.fat} />
             <FormField label="Protein" value={protein} onChangeText={setProtein} unit="g" keyboardType="decimal-pad" error={errors.protein} />

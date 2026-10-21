@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, ScrollView, Text, TextInput, useWindowDimensi
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MealConfidence } from '../../api/mealsApi';
 import { BackButton, PrimaryButton, RoundButton, SecondaryButton } from '../../components/Buttons';
-import { EventTimePicker, FormField } from '../../components/FormField';
+import { AbsorptionChoice, EventTimePicker, FormField } from '../../components/FormField';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
 import { InsulinPenProgressBar } from '../../components/InsulinPenProgressBar';
@@ -15,6 +15,7 @@ import { beginCapture } from '../../services/captureMeal';
 import { useEvents } from '../../services/EventsProvider';
 import { useKeyboardInset } from '../../services/useKeyboardInset';
 import {
+  AbsorptionClass,
   buildMealEvent,
   FieldErrors,
   MealField,
@@ -77,6 +78,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
   const [mealName, setMealName] = useState<string | null>(null);
   const [eatenAt, setEatenAt] = useState<TimeChoice>({ mode: 'minutesAgo', minutes: 0 });
   const [eatenHhmm, setEatenHhmm] = useState('');
+  const [absorption, setAbsorption] = useState<AbsorptionClass | 'unset'>('unset');
   const [confirmErrors, setConfirmErrors] = useState<FieldErrors<MealField>>({});
 
   useEffect(() => {
@@ -186,7 +188,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
         fat: analysis?.totalFatG != null ? String(analysis.totalFatG) : '',
         protein: analysis?.totalProteinG != null ? String(analysis.totalProteinG) : '',
         fiber: analysis?.totalFiberG != null ? String(analysis.totalFiberG) : '',
-        absorption: 'unset',
+        absorption,
         timeApproximate: false,
         time: eatenAt,
         notes: '',
@@ -318,6 +320,8 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
               eatenHhmm={eatenHhmm}
               onEatenAtChange={setEatenAt}
               onEatenHhmmChange={setEatenHhmm}
+              absorption={absorption}
+              onAbsorptionChange={setAbsorption}
               errors={confirmErrors}
             />
           ) : null}
@@ -360,6 +364,7 @@ export function MealReviewScreen({ navigation, route }: ScanScreenProps<'MealRev
                 ) : null}
               </Card>
               <EventTimePicker value={eatenAt} hhmm={eatenHhmm} onChange={setEatenAt} onChangeHhmm={setEatenHhmm} error={confirmErrors.time} />
+              <HitSpeed value={absorption} onChange={setAbsorption} />
             </>
           ) : null}
 
@@ -416,6 +421,8 @@ function ResultContent({
   eatenHhmm,
   onEatenAtChange,
   onEatenHhmmChange,
+  absorption,
+  onAbsorptionChange,
   errors,
 }: {
   analysis: EditableMealAnalysis;
@@ -435,6 +442,8 @@ function ResultContent({
   eatenHhmm: string;
   onEatenAtChange: (choice: TimeChoice) => void;
   onEatenHhmmChange: (text: string) => void;
+  absorption: AbsorptionClass | 'unset';
+  onAbsorptionChange: (value: AbsorptionClass | 'unset') => void;
   errors: FieldErrors<MealField>;
 }) {
   const colors = useColors();
@@ -601,6 +610,7 @@ function ResultContent({
       </View>
 
       <EventTimePicker value={eatenAt} hhmm={eatenHhmm} onChange={onEatenAtChange} onChangeHhmm={onEatenHhmmChange} error={errors.time ?? errors.carbs} />
+      <HitSpeed value={absorption} onChange={onAbsorptionChange} />
     </>
   );
 }
@@ -686,6 +696,17 @@ function Footer({
       }}
     >
       {content}
+    </View>
+  );
+}
+
+/** "How fast does it hit?" with its three chips; nothing chosen means the model's own guess is used. */
+function HitSpeed({ value, onChange }: { value: AbsorptionClass | 'unset'; onChange: (v: AbsorptionClass | 'unset') => void }) {
+  const colors = useColors();
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>How fast does it hit? (optional)</Text>
+      <AbsorptionChoice value={value} onChange={onChange} />
     </View>
   );
 }

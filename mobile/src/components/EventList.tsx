@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import type { InsulinView, MealView } from '../api/eventsApi';
 import {
-  ABSORPTION_OPTIONS,
   formatEventTime,
   toHhmm,
   INSULIN_KINDS,
@@ -16,7 +15,7 @@ import { useEvents } from '../services/EventsProvider';
 import { radius, touch, useColors } from '../theme';
 import { IconButton, PrimaryButton, SecondaryButton } from './Buttons';
 import { Icon } from './Icon';
-import { CheckRow, ChoiceChips, EventTimePicker, FormField } from './FormField';
+import { AbsorptionChoice, CheckRow, EventTimePicker, FormField } from './FormField';
 
 type Row =
   | { key: string; kind: 'meal'; time: string; view: MealView | null; record: EventRecord | null }
@@ -340,7 +339,7 @@ export function EditMeal({ view, onClose, showTitle = true }: { view: MealView; 
         error={timeError}
       />
       <CheckRow checked={approximate} onChange={setApproximate} label="The time is approximate" />
-      <ChoiceChips options={ABSORPTION_OPTIONS} value={absorption} onChange={setAbsorption} />
+      <AbsorptionChoice value={absorption} onChange={setAbsorption} allowClear={view.absorptionClass === null} />
       <PrimaryButton label="Save changes" onPress={save} loading={busy} />
       {!cancelled ? <SecondaryButton label="Cancel this meal" onPress={cancelMeal} /> : null}
       <SecondaryButton label="Back" onPress={onClose} />

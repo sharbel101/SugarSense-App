@@ -11,7 +11,7 @@ import {
   KEEP_MINUTES,
   reduceForecast,
 } from '../src/services/forecastState.ts';
-import { forecastPrompts, formatCarbsOnBoard, formatInsulinOnBoard, savedMessage } from '../src/services/forecastView.ts';
+import { forecastPrompts, formatCarbsOnBoard, formatInsulinOnBoard, mealWaitingForInsulinId, savedMessage } from '../src/services/forecastView.ts';
 import { buildGlucoseChart } from '../src/services/glucoseChart.ts';
 
 const T0 = Date.parse('2026-10-16T10:00:00Z');
@@ -227,8 +227,8 @@ test('forecastPrompts: each banner condition, in priority order, none when nothi
     { id: 'i2', type: 'insulin', time: iso(-9), role: 'range_only', reason: 'insulin_link_ambiguous' },
   ];
   const prompts = forecastPrompts(parseForecastResponse(all));
-  assert.deepEqual(prompts.map((p) => p.kind), ['set_ratio', 'meal_without_insulin'], 'a dose without a meal, or one that could belong to two meals, is not prompted');
-  assert.equal(prompts[1].eventId, 'm1');
+  assert.deepEqual(prompts.map((p) => p.kind), ['set_ratio'], 'no banner for a meal without insulin, or for a dose without a meal');
+  assert.equal(mealWaitingForInsulinId(parseForecastResponse(all)), 'm1', 'the quick-add choice still knows which meal is waiting');
 
   const ratioOnly = okBody();
   ratioOnly.mealAware.availability = availability({ therapySettings: 'unavailable' });

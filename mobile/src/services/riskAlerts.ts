@@ -137,8 +137,9 @@ export type AlertState = {
 };
 
 export type AlertNotification = {
-  kind: RiskKind;
-  type: 'predicted' | 'cleared';
+  /** `meal` = the "possible missed meal log" notification (not a low/high alert). */
+  kind: RiskKind | 'meal';
+  type: 'predicted' | 'cleared' | 'missed_meal';
   title: string;
   body: string;
   /** One tag per kind, so a "cleared" replaces the "predicted" it ends. */

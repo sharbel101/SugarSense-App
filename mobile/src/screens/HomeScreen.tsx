@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
@@ -8,6 +8,8 @@ import { FallbackForecast } from '../components/FallbackForecast';
 import { ForecastChartBlock } from '../components/ForecastExtras';
 import { TrendArrow } from '../components/TrendArrow';
 import { GlucoseStatus } from '../components/GlucoseStatus';
+import { LastOnBoard, LastReading } from '../components/LastKnownCard';
+import { MissedMealBox } from '../components/MissedMealBox';
 import { Icon, IconName } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { useQuickAdd, useTabScreenBottomPadding } from '../components/QuickAdd';
@@ -18,6 +20,7 @@ import { buildGlucoseChart } from '../services/glucoseChart';
 import { useForecast } from '../services/ForecastProvider';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useGlucose } from '../services/GlucoseProvider';
+import { useLastKnown } from '../services/LastKnownSync';
 import { insulinRows, mealRows, type EntryRow } from '../services/homeEntries';
 import { dayKey, trendDisplay } from '../services/mealHistory';
 import { radius, spacing, touch, useColors } from '../theme';
@@ -39,6 +42,8 @@ export function HomeScreen({ navigation, route }: TabScreenProps<'Home'>) {
   const { recent, refreshRecent } = useEvents();
   const { open: openQuickAdd } = useQuickAdd();
   const { view: forecastView } = useForecast();
+  const lastKnown = useLastKnown();
+  const [nowMs, setNowMs] = useState(() => Date.now());
   // Another screen (the Safety cards) can ask for the top of this page: `toTop` is a new number each time.
   const toTop = route.params?.toTop;
 
@@ -47,7 +52,11 @@ export function HomeScreen({ navigation, route }: TabScreenProps<'Home'>) {
   useFocusEffect(
     useCallback(() => {
       refreshRecent();
-      const timer = setInterval(refreshRecent, 60_000);
+      setNowMs(Date.now());
+      const timer = setInterval(() => {
+        refreshRecent();
+        setNowMs(Date.now());
+      }, 60_000);
       return () => clearInterval(timer);
     }, [refreshRecent]),
   );
@@ -136,11 +145,32 @@ export function HomeScreen({ navigation, route }: TabScreenProps<'Home'>) {
               <View style={{ marginTop: 6 }}>
                 <ForecastChartBlock data={okData} height={chart.viewBoxHeight} />
               </View>
+              <View style={{ marginTop: 12 }}>
+                <MissedMealBox />
+              </View>
             </>
-          ) : view.kind === 'ok' ? null : (
+          ) : view.kind === 'ok' ? null : view.kind === 'loading' && lastKnown.glucose === null ? (
             <GlucoseStatus view={view} onRetry={refresh} retrying={refreshing} />
+          ) : (
+            <>
+              <LastReading
+                last={lastKnown}
+                reason={view.kind === 'loading' ? 'Checking for a new reading…' : view.reason}
+                nowMs={nowMs}
+                onRetry={refresh}
+                retrying={refreshing}
+              />
+              <View style={{ marginTop: 14 }}>
+                <LastOnBoard last={lastKnown} />
+              </View>
+            </>
           )}
         </Card>
+        {okData && forecastView.kind !== 'ok' ? (
+          <Card>
+            <LastOnBoard last={lastKnown} />
+          </Card>
+        ) : null}
         {okData && chart && forecastView.kind !== 'ok' ? <FallbackForecast data={okData} hasBand={chart.hasBand} /> : null}
 
         {/* 5 (moved up for reach). Quick actions */}

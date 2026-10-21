@@ -32,12 +32,16 @@ export const INSULIN_KINDS: { value: InsulinKind; label: string }[] = [
 ];
 
 export type AbsorptionClass = 'fast' | 'medium' | 'slow';
-export const ABSORPTION_OPTIONS: { value: AbsorptionClass | 'unset'; label: string }[] = [
-  { value: 'unset', label: 'Not sure' },
-  { value: 'fast', label: 'Fast (juice, sweets)' },
-  { value: 'medium', label: 'Normal' },
-  { value: 'slow', label: 'Slow (fatty or large)' },
+/**
+ * The three ways a meal can hit. The stored values (fast / medium / slow) are what the server knows. Choosing
+ * nothing is `'unset'`: the field is then not sent and the model's own guess is used.
+ */
+export const ABSORPTION_OPTIONS: { value: AbsorptionClass; label: string; hint: string }[] = [
+  { value: 'fast', label: '🍬 Fast', hint: 'candy, juice, sweets' },
+  { value: 'medium', label: '🍱 Medium', hint: 'balanced meals' },
+  { value: 'slow', label: '🍕 Slow', hint: 'pizza, burgers, fatty meals' },
 ];
+export const ABSORPTION_NOTE = 'Slow means the carbs reach your blood more gradually.';
 
 /** `gemini` = the AI estimate unchanged; `gemini_edited` = the person corrected it; `manual` = typed in. */
 export type MealSource = 'gemini' | 'gemini_edited' | 'manual';

@@ -8,7 +8,7 @@ import { useEvents } from '../services/EventsProvider';
 import { useForecast } from '../services/ForecastProvider';
 import { useKeyboardInset } from '../services/useKeyboardInset';
 import { findMealRef, type MealRef } from '../services/mealRefs';
-import { forecastPrompts } from '../services/forecastView';
+import { mealWaitingForInsulinId } from '../services/forecastView';
 import { radius, shadow, spacing, touch, useColors } from '../theme';
 import { EventList } from './EventList';
 import { Icon, IconName } from './Icon';
@@ -218,10 +218,10 @@ function Menu({ onPick, onPickNone }: { onPick: (m: QuickAddMode) => void; onPic
 
   // "I took no insulin for [meal]" appears only when the server says a meal is waiting for an insulin record.
   const waitingMeal = useMemo<MealRef | null>(() => {
-    if (view.kind !== 'ok' || view.data.mealAware.availability.mealsRangeOnly <= 0) return null;
-    const prompt = forecastPrompts(view.data).find((p) => p.kind === 'meal_without_insulin');
-    if (!prompt?.eventId) return null;
-    return findMealRef(records, recent.kind === 'ok' ? recent.meals : [], prompt.eventId, -new Date().getTimezoneOffset());
+    if (view.kind !== 'ok') return null;
+    const eventId = mealWaitingForInsulinId(view.data);
+    if (!eventId) return null;
+    return findMealRef(records, recent.kind === 'ok' ? recent.meals : [], eventId, -new Date().getTimezoneOffset());
   }, [view, records, recent]);
 
   return (

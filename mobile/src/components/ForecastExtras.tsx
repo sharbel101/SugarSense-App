@@ -197,23 +197,15 @@ function SourceRowView({ row, first }: { row: SourceRow; first: boolean }) {
 export function ForecastPrompts({ forecast }: { forecast: ForecastOkDisplay }) {
   const colors = useColors();
   const nav = useNavigation();
-  const { open } = useQuickAdd();
-  const { records, recent } = useEvents();
   const prompts = forecastPrompts(forecast);
   if (prompts.length === 0) return null;
-  const mealFor = (id: string | null) => (id ? findMealRef(records, recent.kind === 'ok' ? recent.meals : [], id, -new Date().getTimezoneOffset()) : null);
 
   return (
     <View style={{ gap: 8 }}>
       {prompts.map((p) => {
-        const warning = p.kind === 'meal_without_insulin';
-        const meal = warning ? mealFor(p.eventId) : null;
+        const warning = false;
         const action: { label: string; run: () => void } | null =
-          p.kind === 'set_ratio'
-            ? { label: 'Settings', run: () => nav.navigate('InsulinSettings' as never) }
-            : warning
-              ? { label: 'Add insulin', run: () => open(meal ? { mode: 'insulin', meal } : { mode: 'insulin' }) }
-              : null;
+          p.kind === 'set_ratio' ? { label: 'Settings', run: () => nav.navigate('InsulinSettings' as never) } : null;
         return (
           <View
             key={p.kind}

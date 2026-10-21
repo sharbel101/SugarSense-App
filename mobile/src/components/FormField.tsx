@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { radius, touch, useColors } from '../theme';
 import { hhmmTo12, parseClock12, type Meridiem } from '../services/clock12';
-import { TimeChoice } from '../services/events';
+import { ABSORPTION_NOTE, ABSORPTION_OPTIONS, type AbsorptionClass, TimeChoice } from '../services/events';
 import { Icon } from './Icon';
 
 type FieldProps = {
@@ -114,6 +114,58 @@ export function ChoiceChips<T extends string | number>({
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+/**
+ * "How fast does it hit?": three chips with an emoji and a short hint, and one line explaining "slow". Nothing
+ * chosen = `'unset'` (the model's guess is used). Tapping the chosen chip again clears it, unless `allowClear`
+ * is false (an edit form cannot send "unset" to the server).
+ */
+export function AbsorptionChoice({
+  value,
+  onChange,
+  allowClear = true,
+}: {
+  value: AbsorptionClass | 'unset';
+  onChange: (value: AbsorptionClass | 'unset') => void;
+  allowClear?: boolean;
+}) {
+  const colors = useColors();
+  return (
+    <View style={{ gap: 8 }}>
+      <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', gap: 8 }}>
+        {ABSORPTION_OPTIONS.map((option) => {
+          const selected = option.value === value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onChange(selected && allowClear ? 'unset' : option.value)}
+              accessibilityRole="radio"
+              accessibilityLabel={`${option.label.replace(/^\S+\s/, '')}: ${option.hint}`}
+              aria-checked={selected}
+              style={{
+                flex: 1,
+                minHeight: touch.min,
+                paddingHorizontal: 8,
+                paddingVertical: 10,
+                alignItems: 'center',
+                justifyContent: 'flex-start',
+                gap: 2,
+                borderRadius: radius.row,
+                borderWidth: 1,
+                borderColor: selected ? colors.blue600 : colors.border,
+                backgroundColor: selected ? colors.blue600 : colors.surface,
+              }}
+            >
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: selected ? colors.onBlue : colors.ink }}>{option.label}</Text>
+              <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, textAlign: 'center', color: selected ? colors.onBlue : colors.ink2 }}>{option.hint}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink2, lineHeight: 20 }}>{ABSORPTION_NOTE}</Text>
     </View>
   );
 }

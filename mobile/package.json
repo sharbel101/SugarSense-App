@@ -56,6 +56,7 @@
     "test:capture": "node --no-warnings --experimental-strip-types --test tests/captureStore.test.mjs",
     "test:sources": "node --no-warnings --experimental-strip-types --test tests/onBoardSources.test.mjs",
     "test:cancel": "node --no-warnings --experimental-strip-types --test tests/cancelMealAndDose.test.mjs",
+    "test:spike": "node --no-warnings --experimental-strip-types --test tests/mealSpike.test.mjs",
     "test:garmin": "node --no-warnings --experimental-strip-types --test tests/garmin.test.mjs",
     "test:wearablemodel": "node --no-warnings --experimental-strip-types --test tests/wearableModel.test.mjs",
     "test:wearable": "node --no-warnings --experimental-strip-types --test tests/wearableDemo.test.mjs",
