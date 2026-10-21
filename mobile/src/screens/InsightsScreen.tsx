@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback } from 'react';
-import { Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Animated, Platform, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Insight } from '../api/insightsContract';
 import { Avatar } from '../components/Avatar';
@@ -10,6 +10,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { useTabScreenBottomPadding } from '../components/QuickAdd';
 import { TabScreenProps } from '../navigation/types';
+import { useReducedMotionPreference } from '../services/reducedMotion';
 import { formatAge, formatClock } from '../services/glucoseState';
 import { useInsights } from '../services/InsightsProvider';
 import { spacing, useColors } from '../theme';
@@ -141,47 +142,89 @@ function StateCard({ title, text, onRetry, retrying }: { title: string; text: st
   );
 }
 
-/** One insight, read as headline, facts, explanation, limitations. Facts are shown as received. */
+/**
+ * One insight. The front is short: the headline and the first fact. Tapping flips the card to the back:
+ * the remaining facts, "In plain words" and "What this can't tell you". Facts are shown as received.
+ */
 const InsightCard = React.memo(function InsightCard({ insight }: { insight: Insight }) {
   const colors = useColors();
+  const reduceMotion = useReducedMotionPreference();
+  const [flipped, setFlipped] = useState(false);
+  const [scaleX] = useState(() => new Animated.Value(1));
   const icon = CATEGORY_ICON[insight.category] ?? 'sparkle';
   const when = insight.createdAt ? formatClock(insight.createdAt) : '';
   const meta = [insight.trigger ? TRIGGER_LABEL[insight.trigger] : null, when || null].filter(Boolean).join(' · ');
-  const label = [insight.headline, ...insight.facts, insight.explanation, ...insight.limitations].filter(Boolean).join('. ');
+
+  const [first, ...moreFacts] = insight.facts;
+  const hasBack = moreFacts.length > 0 || insight.explanation !== null || insight.limitations.length > 0;
+
+  const flip = () => {
+    if (!hasBack) return;
+    if (reduceMotion) {
+      setFlipped((v) => !v);
+      return;
+    }
+    const native = Platform.OS !== 'web';
+    Animated.timing(scaleX, { toValue: 0, duration: 110, useNativeDriver: native }).start(() => {
+      setFlipped((v) => !v);
+      Animated.timing(scaleX, { toValue: 1, duration: 110, useNativeDriver: native }).start();
+    });
+  };
+
+  const label = flipped
+    ? `${insight.headline}. Details. ${[...moreFacts, insight.explanation, ...insight.limitations].filter(Boolean).join('. ')}`
+    : `${insight.headline}. ${first}${hasBack ? '. Double tap for details.' : ''}`;
+  const small = { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 } as const;
+
   return (
-    <Card>
-      <View accessible accessibilityLabel={label} style={{ gap: 10 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.purple100, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name={icon} size={16} color={colors.purple600} />
+    <Animated.View style={{ transform: [{ scaleX }] }}>
+      <Card onPress={hasBack ? flip : undefined} accessibilityLabel={label}>
+        <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.purple100, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name={icon} size={16} color={colors.purple600} />
+            </View>
+            <Text accessibilityRole="header" style={{ flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
+              {insight.headline}
+            </Text>
           </View>
-          <Text accessibilityRole="header" style={{ flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink }}>
-            {insight.headline}
-          </Text>
+
+          {!flipped ? (
+            <>
+              <Text style={{ ...body, color: colors.ink }}>{first}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <Text style={{ ...body, color: colors.ink3, flexShrink: 1 }}>{meta}</Text>
+                {hasBack ? <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.blue600 }}>Details</Text> : null}
+              </View>
+            </>
+          ) : (
+            <>
+              {moreFacts.map((f, i) => (
+                <Text key={i} style={{ ...body, color: colors.ink }}>
+                  {f}
+                </Text>
+              ))}
+              {insight.explanation ? (
+                <View style={{ gap: 2 }}>
+                  <Text style={small}>In plain words</Text>
+                  <Text style={{ ...body, color: colors.ink2 }}>{insight.explanation}</Text>
+                </View>
+              ) : null}
+              {insight.limitations.length > 0 ? (
+                <View style={{ gap: 2 }}>
+                  <Text style={small}>What this can&apos;t tell you</Text>
+                  {insight.limitations.map((l, i) => (
+                    <Text key={i} style={{ ...body, color: colors.ink2 }}>
+                      {l}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+              <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.blue600 }}>Back</Text>
+            </>
+          )}
         </View>
-        {insight.facts.map((f, i) => (
-          <Text key={i} style={{ ...body, color: colors.ink }}>
-            {f}
-          </Text>
-        ))}
-        {insight.explanation ? (
-          <View style={{ gap: 2 }}>
-            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>In plain words</Text>
-            <Text style={{ ...body, color: colors.ink2 }}>{insight.explanation}</Text>
-          </View>
-        ) : null}
-        {insight.limitations.length > 0 ? (
-          <View style={{ gap: 2 }}>
-            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.ink2, textTransform: 'uppercase', letterSpacing: 0.5 }}>What this can&apos;t tell you</Text>
-            {insight.limitations.map((l, i) => (
-              <Text key={i} style={{ ...body, color: colors.ink2 }}>
-                {l}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-        {meta ? <Text style={{ ...body, color: colors.ink3 }}>{meta}</Text> : null}
-      </View>
-    </Card>
+      </Card>
+    </Animated.View>
   );
 });
