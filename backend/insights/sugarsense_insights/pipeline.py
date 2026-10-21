@@ -47,7 +47,7 @@ def run_key_for(kind: str, snap: Snapshot) -> str:
     d = snap.now.astimezone(_tz(snap)).date().isoformat()
     if kind == "event":
         return f"event:{d}:{int(snap.now.timestamp() // 900)}"   # one event run per 15-minute bucket
-    return f"{kind}:{d}"
+    return f"{kind}:{d}:v{ENGINE_VERSION.rsplit('-', 1)[-1]}"   # a new engine version writes today's briefing again instead of being skipped as already done
 
 
 def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Availability]) -> tuple[list[Candidate], dict[str, list[str]]]:

@@ -7,7 +7,7 @@ from sugarsense_insights.cli import due_kinds
 from sugarsense_insights.config import Thresholds
 from sugarsense_insights.llm import LlmReply
 from sugarsense_insights.models import Candidate, Fact, ForecastPoint, Meal, Reading, Sleep
-from sugarsense_insights.pipeline import run
+from sugarsense_insights.pipeline import run, run_key_for
 from sugarsense_insights.ranking import decide, facts_hash, rank
 from sugarsense_insights.store import InMemoryStore
 
@@ -84,14 +84,14 @@ class Lifecycle(unittest.TestCase):
     def test_failed_run_can_be_retried_but_running_one_is_busy(self):
         store = InMemoryStore()
         snap = snapshot(MORNING, days=9)
-        rid, st = store.claim_run(USER, "morning:2026-10-21", "morning", MORNING, "v", "p", None)
+        rid, st = store.claim_run(USER, run_key_for("morning", snap), "morning", MORNING, "v", "p", None)
         self.assertEqual(st, "claimed")
-        self.assertEqual(store.claim_run(USER, "morning:2026-10-21", "morning", MORNING + timedelta(minutes=1), "v", "p", None)[1], "busy")
+        self.assertEqual(store.claim_run(USER, run_key_for("morning", snap), "morning", MORNING + timedelta(minutes=1), "v", "p", None)[1], "busy")
         self.assertEqual(run("morning", USER, MORNING + timedelta(minutes=2), FakeSource(snap), store, FakeLLM()).state, "busy")
         store.finish_run(rid, "failed", {}, MORNING)
         self.assertEqual(run("morning", USER, MORNING + timedelta(minutes=3), FakeSource(snap), store, FakeLLM()).state, "complete")
         # a crashed 'running' run becomes claimable again after 30 min
-        s2 = InMemoryStore(); s2.claim_run(USER, "morning:2026-10-21", "morning", MORNING, "v", "p", None)
+        s2 = InMemoryStore(); s2.claim_run(USER, run_key_for("morning", snap), "morning", MORNING, "v", "p", None)
         self.assertEqual(run("morning", USER, MORNING + timedelta(minutes=31), FakeSource(snap), s2, FakeLLM()).state, "complete")
 
     def test_dry_run_writes_nothing(self):
