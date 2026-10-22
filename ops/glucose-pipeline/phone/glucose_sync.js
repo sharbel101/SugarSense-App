@@ -19,8 +19,15 @@
 //   * one recovery retry (back, home, relaunch) when the reading is not found
 // ---------------------------------------------------------------------------
 
-var AGENT_VERSION = "v3.3-2026-10-21";
+var AGENT_VERSION = "v4.0-2026-10-22";
 var FAIL_LOG_PATH = "/sdcard/Download/glucose_fail.log";
+var MAIN_PATH = "/sdcard/Download/glucose_sync.js";
+var WATCHDOG_PATH = "/sdcard/Download/glucose_watchdog.js";
+var RETRY_AFTER_FAIL_MS = 90 * 1000;   // after a failed scrape try again in 90 s, not after the whole safety period
+var STALE_RESTART_MIN = 20;            // iCan Reach still shows data this old after a refresh: restart the app (rate limited)
+var FAIL_RESTART_COUNT = 2;            // ... or after this many failed scrapes in a row
+var RESTART_MIN_GAP_MS = 15 * 60 * 1000;
+var RESTART_BACKOFF_MS = 60 * 60 * 1000;   // a restart that did not bring newer data means the gap is on the sensor/primary-phone side: ask again only hourly
 
 var DEFAULT_PRIMARY = "";  // set "endpoint" in glucose_config.json on the phone (quick-tunnel URL kept out of the public repo)
 var DEFAULT_FALLBACK = "https://entitle-evacuate-removed.ngrok-free.dev";
@@ -80,6 +87,139 @@ function releaseWakeLock() {
     try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (e) {}
 }
 try { events.on("exit", releaseWakeLock); } catch (e) {}
+
+// --- keep the SCREEN on while a scrape runs ----------------------------------
+// The screen times out after 15 s but a scrape takes 30-60 s. Reads failed when the screen went to sleep in the middle, and a pull gesture on a dark or
+// half-woken phone opens the notification shade instead of refreshing iCan Reach (see glucose_fail.log). The old SCREEN wake lock is ignored by Android for
+// an app like AutoJs6 (targetSdk 36), so a 1-pixel, untouchable overlay window with keepScreenOn is used instead (tested: the display stays on past the
+// timeout). It lives only while a scrape runs and is closed when this script ends.
+var screenWin = null;
+function holdScreen() {
+    try {
+        if (screenWin == null) {
+            screenWin = floaty.rawWindow('<frame w="1px" h="1px" keepScreenOn="true"/>');
+            screenWin.setTouchable(false);
+            screenWin.setPosition(0, 0);
+        }
+    } catch (e) {
+        screenWin = null;
+        log("screen hold failed (continuing): " + e);
+    }
+}
+function releaseScreen() {
+    try { if (screenWin != null) screenWin.close(); } catch (e) {}
+    screenWin = null;
+}
+try { events.on("exit", releaseScreen); } catch (e) {}
+
+function keyguardLocked() {
+    try { return context.getSystemService(context.KEYGUARD_SERVICE).isKeyguardLocked(); } catch (e) { return false; }
+}
+function foreground() {
+    try { return String(currentPackage()); } catch (e) { return ""; }
+}
+
+// Collapse whatever covers the app (notification shade, quick settings) and go back to a known state.
+function clearOverlays() {
+    try {
+        if (foreground() === "com.android.systemui") {
+            back();
+            sleep(500);
+            if (foreground() === "com.android.systemui") {
+                swipe(device.width / 2, device.height * 0.5, device.width / 2, device.height * 0.02, 300);
+                sleep(500);
+            }
+        }
+        home();
+        sleep(800);
+    } catch (e) {}
+}
+
+// Bring iCan Reach to the front and CONFIRM it is there before any gesture is made.
+function ensureIcanForeground() {
+    for (var attempt = 0; attempt < 3; attempt++) {
+        app.launchPackage(ICAN_PKG);
+        for (var w = 0; w < 10; w++) {
+            if (foreground() === ICAN_PKG) return true;
+            sleep(1000);
+        }
+        log("iCan Reach is not in front (" + foreground() + ") - clearing overlays");
+        clearOverlays();
+    }
+    return false;
+}
+
+function wakeAndUnlock() {
+    for (var i = 0; i < 4 && !device.isScreenOn(); i++) {
+        device.wakeUpIfNeeded();
+        device.wakeUp();
+        sleep(1200);
+    }
+    if (keyguardLocked()) {
+        swipe(device.width / 2, device.height * 0.9, device.width / 2, device.height * 0.1, 350);
+        sleep(1200);
+    }
+}
+
+// Last resort when iCan Reach itself looks stuck: force-stop it from Android's app-info page and start it fresh. Rate limited, every step logged.
+var lastRestart = 0;
+var restartGapMs = RESTART_MIN_GAP_MS;
+var failStreak = 0;
+function forceRestartIcan(why) {
+    if (Date.now() - lastRestart < restartGapMs) return false;
+    lastRestart = Date.now();
+    log("restarting iCan Reach: " + why);
+    report("ican_restart", why);
+    try {
+        app.openAppSetting(ICAN_PKG);
+        sleep(2500);
+        var btn = textMatches("(?i)(force stop|force close)").findOne(4000);
+        if (btn == null) btn = descMatches("(?i)(force stop|force close)").findOne(1500);
+        if (btn == null) {
+            log("force-stop button not found");
+            dumpScreen("no-force-stop");
+            home();
+            return false;
+        }
+        if (btn.enabled()) {
+            var tgt = btn;
+            var up = 0;
+            while (tgt != null && !tgt.clickable() && up < 4) { tgt = tgt.parent(); up++; }
+            (tgt != null ? tgt : btn).click();
+            sleep(1500);
+            var ok = textMatches("(?i)(ok|force stop|force close)").clickable(true).findOne(3000);
+            if (ok != null) { ok.click(); sleep(1500); } else { log("force-stop confirmation not found"); }
+        } else {
+            log("force-stop is disabled (the app is not running)");
+        }
+        home();
+        sleep(1000);
+        app.launchPackage(ICAN_PKG);
+        sleep(8000);
+        clearAllDialogs();
+        return true;
+    } catch (e) {
+        log("force restart failed: " + e);
+        try { home(); } catch (e2) {}
+        return false;
+    }
+}
+
+// The watchdog (glucose_watchdog.js) restarts this script if it stops; this script makes sure the watchdog is running.
+function ensureWatchdog() {
+    try {
+        var list = engines.all();
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].getSource()).indexOf("glucose_watchdog") >= 0) return;
+        }
+        if (files.exists(WATCHDOG_PATH)) {
+            engines.execScriptFile(WATCHDOG_PATH);
+            log("watchdog started");
+        }
+    } catch (e) {
+        log("watchdog check failed: " + e);
+    }
+}
 
 // --- config + endpoint list ---------------------------------------------------
 function baseOf(url) {
@@ -242,6 +382,7 @@ function refreshEndpoints() {
 var ALERT_RE = /glucose level is|glucose alert|preset|high limit|low limit|above the|below the|out of range|urgent|\balert\b|\brate\b|mean glucose|time in range|highest|lowest|average/i;
 
 function parseReading(descStr) {
+    if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(descStr)) return null;   // the detail page (date + value + sensor age), not the list card
     if (ALERT_RE.test(descStr)) return null;
     var lines = descStr.split("\n").map(function (s) { return s.trim(); })
                        .filter(function (s) { return s.length > 0; });
@@ -388,12 +529,23 @@ function dumpScreen(tag) {
 }
 
 function openAndRead() {
-    app.launchPackage(ICAN_PKG);
-    sleep(5000);
+    if (!ensureIcanForeground()) {
+        log("could not bring iCan Reach to the front");
+        return null;
+    }
+    sleep(4000);
     var closed = clearAllDialogs();
     log(closed > 0 ? ("cleared " + closed + " dialog(s)") : "no dialog");
     sleep(closed > 0 ? 3000 : 1000);
-    if (PULL_TO_REFRESH) {
+    // iCan Reach resumes on whatever page it was left on. The reading must come from the list page, so leave the detail page first.
+    for (var k = 0; k < 2; k++) {
+        if (descMatches("(?s).*\\d{1,2}/\\d{1,2}/\\d{4}.*mg/dL.*").exists()) {
+            log("iCan Reach is on its detail page - going back to the list");
+            back();
+            sleep(1500);
+        } else break;
+    }
+    if (PULL_TO_REFRESH && foreground() === ICAN_PKG) {
         pullToRefresh();
         // the refresh can raise a fresh alert popup on top of the reading card
         var closed2 = clearAllDialogs();
@@ -403,39 +555,63 @@ function openAndRead() {
 }
 
 function syncOnce(fetchId) {
-    var wasAsleep = !device.isScreenOn();
-    device.wakeUpIfNeeded();
-    device.wakeUp();
-    sleep(1500);
-    if (wasAsleep) {
-        swipe(device.width / 2, device.height * 0.9, device.width / 2, device.height * 0.1, 350);
-        sleep(1500);
+    holdScreen();
+    try {
+        return syncOnceInner(fetchId);
+    } finally {
+        releaseScreen();
     }
+}
+
+function syncOnceInner(fetchId) {
+    wakeAndUnlock();
+    if (foreground() === "com.android.systemui") clearOverlays();
 
     var reading = openAndRead();
     if (!reading) {
         // one recovery attempt: leave whatever page we are on, relaunch fresh
         log("glucose node not found - recovery retry");
-        try { back(); sleep(600); back(); sleep(600); home(); sleep(1200); } catch (e) {}
+        clearOverlays();
         reading = openAndRead();
     }
     if (!reading) {
-        // last resort: the pull-to-refresh itself can leave the card unreadable for a while, so read the app as it is, without pulling
+        // the pull-to-refresh itself can leave the card unreadable for a while, so read the app as it is, without pulling
         dumpScreen("retry-failed");
         log("glucose node not found after retry - reading without pull-to-refresh");
-        try { app.launchPackage(ICAN_PKG); sleep(8000); clearAllDialogs(); } catch (e) {}
+        try { if (ensureIcanForeground()) { sleep(6000); clearAllDialogs(); } } catch (e) {}
         reading = readGlucose();
         if (reading) log("read without pull-to-refresh worked");
     }
     if (!reading) {
+        failStreak++;
         dumpScreen("final-failed");
-        log("glucose node not found after retry");
-        report("scrape_failed", "reading not found on screen after recovery retry");
+        log("glucose node not found (failed scrapes in a row: " + failStreak + ")");
+        if (failStreak >= FAIL_RESTART_COUNT && forceRestartIcan(failStreak + " scrapes in a row could not read the screen")) {
+            reading = openAndRead();
+            if (reading) log("read after restarting iCan Reach");
+        }
+    }
+    if (!reading) {
+        report("scrape_failed", "reading not found on screen after recovery retry (" + failStreak + " in a row)");
         home();
         return false;
     }
+    failStreak = 0;
     if (reading.ageMinutes !== null && reading.ageMinutes >= STALE_REPORT_AGE_MIN) {
         report("source_stale", "iCan Reach shows data " + reading.ageMinutes + " min old (sensor/primary phone side)");
+    }
+    if (reading.ageMinutes !== null && reading.ageMinutes >= STALE_RESTART_MIN && !reading.ageCoarse) {
+        // The follower app can be stuck while the primary phone is fine: one rate-limited restart, then read again.
+        if (forceRestartIcan("iCan Reach shows data " + reading.ageMinutes + " min old after a refresh")) {
+            var again = openAndRead();
+            if (again) {
+                log("after restart iCan Reach shows " + (again.ageMinutes === null ? "?" : again.ageMinutes) + " min old data");
+                reading = again;
+                // newer data after the restart = the app was stuck (restart again soon if it recurs); the same old data = the sensor side has not uploaded
+                restartGapMs = (again.ageMinutes !== null && again.ageMinutes >= STALE_RESTART_MIN) ? RESTART_BACKOFF_MS : RESTART_MIN_GAP_MS;
+                if (restartGapMs === RESTART_BACKOFF_MS) report("source_gap", "restarting iCan Reach did not bring newer data (" + again.ageMinutes + " min old): the sensor or the primary phone is not uploading");
+            }
+        }
     }
     if (reading.ageCoarse) {
         // An hour-level label ("1 hours ago") cannot give the reading's real time. Posting it would stamp the
@@ -475,6 +651,8 @@ cfg = loadConfig();
 if (!cfg.token) log("WARNING: no token in " + CONFIG_PATH);
 log("glucose agent " + AGENT_VERSION + " started - endpoints: " + cfg.ep.map(function (e) { return e.base; }).join(", "));
 report("started", AGENT_VERSION);
+ensureWatchdog();
+var lastWatchdogCheck = Date.now();
 
 var lastScrape = 0;
 while (true) {
@@ -488,13 +666,17 @@ while (true) {
 
     if (reason !== null) {
         log("scrape (" + reason + (fetchId ? " id=" + fetchId.substring(0, 8) : "") + ")");
-        try { syncOnce(fetchId); lastScrape = Date.now(); }
+        try {
+            var ok = syncOnce(fetchId);
+            lastScrape = ok ? Date.now() : Date.now() - SAFETY_SCRAPE_MS + RETRY_AFTER_FAIL_MS;   // a failed scrape is retried in 90 s
+        }
         catch (e) {
             log("cycle error (continuing): " + e);
             report("cycle_error", e);
             try { home(); } catch (e2) {}
         }
     }
+    if (Date.now() - lastWatchdogCheck > 5 * 60 * 1000) { lastWatchdogCheck = Date.now(); ensureWatchdog(); }
     if (pending.length > 0) { try { flushPending(); } catch (e3) {} }
     try { refreshEndpoints(); } catch (e4) { log("discovery error: " + e4); }
     sleep(onFallback() ? FALLBACK_POLL_MS : POLL_MS);

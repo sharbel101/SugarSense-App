@@ -97,3 +97,14 @@ Always: say what you saw (code, since when, evidence), what you did, and whether
 - `bg-cloudflared` restarts a dead tunnel in 5 s (new hostname); `bg-guardian` republishes it.
 - Debounce prevents flapping from waking anyone: services 60 s, tunnels 2-10 min, scrape failures 10 min,
   phone offline 15 min.
+
+## 6. Phone collector v4.0 (2026-10-22): what changed and how to check it
+
+- **Screen held on during a scrape** with a 1-pixel overlay window (`keepScreenOn`). The old wake lock is ignored by Android for AutoJs6 (targetSdk 36), the screen timed out after 15 s mid-scrape and the pull gesture opened the notification shade (see `glucose_fail.log`).
+- **iCan Reach is confirmed in front before any gesture**; notification shade/quick settings are cleared; the detail page is left (and never parsed as a reading).
+- **A failed scrape is retried after 90 s**, not after the 6-minute safety period.
+- **Restart of iCan Reach** (force stop from Android's app-info page, then relaunch) after 2 failed scrapes in a row, or when the app still shows data 20+ minutes old after a refresh. Rate limited to once per 15 minutes; if it brings no newer data it is the sensor/primary phone that is not uploading, it is reported as `source_gap` and retried only hourly.
+- **Watchdog** (`glucose_watchdog.js`): restarts `glucose_sync.js` if it is not running or its heartbeat (`glucose_sync.lock`) is older than 5 minutes; `glucose_sync.js` restarts the watchdog. Tested by killing the main script: back in under 90 s.
+- Nothing needs the laptop. Keep the phone on a charger and online; the phone's own boot task starts the script, which starts the watchdog.
+- Deploy: `adb push glucose_sync.js glucose_watchdog.js /sdcard/Download/`, then section 4. Roll back: `cp glucose_sync.v3.3.bak.js glucose_sync.js` (backup is on the phone) and restart.
+- Limits: when iCan Reach itself has no newer data (sensor or primary phone not uploading), nothing on this phone can create it. The follower app's chart is a drawn image, so readings missed during such a gap cannot be recovered afterwards.
