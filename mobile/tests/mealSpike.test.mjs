@@ -78,7 +78,7 @@ test('state survives a round trip; garbage gives the empty state', () => {
 
 test('last known: round trip, newer wins over older, garbage or implausible glucose gives nothing', async () => {
   const { deserializeLastKnown, serializeLastKnown, mergeGlucose, mergeOnBoard, EMPTY_LAST_KNOWN } = await import('../src/services/lastKnown.ts');
-  const lk = { glucose: { mgdl: 120, measuredAt: '2026-10-21T18:00:00.000Z' }, onBoard: { insulinUnits: 0.8, insulin: 'logged', carbsGrams: null, asOf: '2026-10-21T18:00:00.000Z' } };
+  const lk = { glucose: { mgdl: 120, measuredAt: '2026-10-21T18:00:00.000Z' }, onBoard: { insulinUnits: 0.8, insulin: 'logged', carbsGrams: null, generatedAt: '2026-10-21T18:00:00.000Z' } };
   assert.deepEqual(deserializeLastKnown(serializeLastKnown(lk)), lk);
   assert.equal(deserializeLastKnown('{x').glucose, null);
   assert.deepEqual(deserializeLastKnown(null), EMPTY_LAST_KNOWN);
@@ -86,6 +86,6 @@ test('last known: round trip, newer wins over older, garbage or implausible gluc
   const newer = mergeGlucose(lk, { mgdl: 140, measuredAt: '2026-10-21T18:05:00.000Z' });
   assert.equal(newer.glucose.mgdl, 140);
   assert.equal(mergeGlucose(newer, { mgdl: 99, measuredAt: '2026-10-21T17:00:00.000Z' }), newer, 'an older reading never replaces a newer one');
-  assert.equal(mergeOnBoard(lk, { insulinUnits: 0, insulin: 'none_recorded', carbsGrams: null, asOf: '2026-10-21T17:00:00.000Z' }), lk);
+  assert.equal(mergeOnBoard(lk, { insulinUnits: 0, insulin: 'none_recorded', carbsGrams: null, generatedAt: '2026-10-21T17:00:00.000Z' }), lk);
   assert.equal(lk.onBoard.carbsGrams, null, 'unknown stays null, never 0');
 });

@@ -56,9 +56,17 @@ export function LastReading({ last, reason, nowMs, onRetry, retrying }: { last: 
 export function LastOnBoard({ last }: { last: LastKnown }) {
   const colors = useColors();
   const b = last.onBoard;
-  const insulin = b ? formatInsulinOnBoard({ insulinOnBoardUnits: b.insulinUnits, insulin: b.insulin }) : { label: 'Insulin on board', value: 'unknown', caption: 'not available yet', known: false };
-  const carbs = b ? formatCarbsOnBoard({ carbsOnBoardGrams: b.carbsGrams }) : { label: 'Carbs on board', value: 'unknown', caption: 'not available yet', known: false };
-  const asOf = b ? `as of ${formatClock(b.asOf)} · may be lower now` : null;
+  // After a save and before the refreshed forecast arrives, the remembered amounts predate what the person just
+  // logged: say "unknown", never the old number (an old 0 g would read as "your meal is not counted").
+  const updating = last.newEntrySinceForecast === true;
+  const unknown = (label: string, caption: string) => ({ label, value: 'unknown', caption, known: false });
+  const insulin = updating
+    ? unknown('Insulin on board', 'updating after your entry')
+    : b
+      ? formatInsulinOnBoard({ insulinOnBoardUnits: b.insulinUnits, insulin: b.insulin })
+      : unknown('Insulin on board', 'not available yet');
+  const carbs = updating ? unknown('Carbs on board', 'updating after your entry') : b ? formatCarbsOnBoard({ carbsOnBoardGrams: b.carbsGrams }) : unknown('Carbs on board', 'not available yet');
+  const asOf = b && !updating ? `as of ${formatClock(b.generatedAt)} · may be lower now` : null;
   return (
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', gap: 10 }}>

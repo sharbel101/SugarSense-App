@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from 'react-native';
 import { fetchForecast } from '../api/apiContext';
 import type { ForecastDisplay } from '../api/forecastContract';
+import { devLog } from './devLog';
 import {
   applyForecastResponse,
   deriveForecastView,
@@ -11,6 +12,20 @@ import {
   type ForecastView,
 } from './forecastState';
 
+/** Dev only: what each forecast carried (carbs on board and when it was built), to trace a wrong number. */
+function logForecast(source: 'poll' | 'save', f: ForecastDisplay) {
+  if (f.status === 'ok') {
+    devLog(`forecast (${source})`, {
+      status: f.status,
+      carbsOnBoardGrams: f.mealAware.availability.carbsOnBoardGrams,
+      insulinOnBoardUnits: f.mealAware.availability.insulinOnBoardUnits,
+      generatedAt: f.generatedAt,
+      anchor: f.anchor.measuredAt,
+    });
+  } else {
+    devLog(`forecast (${source})`, { status: f.status });
+  }
+}
 /** The reading changes every 3-5 minutes: do not poll faster. */
 export const FORECAST_POLL_MS = 60_000;
 const CLOCK_TICK_MS = 30_000;
@@ -49,6 +64,7 @@ export function ForecastProvider({ children }: { children: React.ReactNode }) {
       if (controller === mine) controller = null;
       if (disposed || mine.signal.aborted) return;
       const t = Date.now();
+      if (outcome.kind === 'response') logForecast('poll', outcome.response);
       setState((s) => reduceForecast(s, outcome, t));
       setNowMs(t);
     };
@@ -91,6 +107,7 @@ export function ForecastProvider({ children }: { children: React.ReactNode }) {
 
   const applyForecast = useCallback((forecast: ForecastDisplay) => {
     const t = Date.now();
+    logForecast('save', forecast);
     setState((s) => applyForecastResponse(s, forecast, t));
     setNowMs(t);
   }, []);

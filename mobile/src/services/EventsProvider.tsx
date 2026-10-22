@@ -24,6 +24,7 @@ import {
   type EventRecord,
 } from './eventQueue';
 import { useForecast } from './ForecastProvider';
+import { noteEntrySaved } from './LastKnownSync';
 import { recentAfterRefresh, recentWhileRefreshing, type RecentState } from './recentState';
 
 const STORAGE_KEY = 'sugarsense.eventQueue.v1';
@@ -120,6 +121,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
             if (report.skipped) continue;
             progressed = progressed || report.record.status === 'saved';
             anySaved = anySaved || report.record.status === 'saved';
+            // Before the refreshed forecast is applied: the remembered on-board amounts predate this save.
+            if (report.record.status === 'saved') noteEntrySaved();
             recordsRef.current = recordsRef.current.map((r) => (r.event.id === rec.event.id ? report.record : r));
             setRecords(recordsRef.current);
             if (report.forecast) applyForecast(report.forecast);
@@ -190,6 +193,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     async (serverId: string, patch: MealPatch) => {
       const out = await patchMeal(apiContext, serverId, patch);
       if (SERVER_HAS_IT.has(out.result)) {
+        noteEntrySaved();
         if (out.forecast) applyForecast(out.forecast);
         refreshRecent();
       }
@@ -202,6 +206,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     async (serverId: string, patch: InsulinPatch) => {
       const out = await patchInsulin(apiContext, serverId, patch);
       if (SERVER_HAS_IT.has(out.result)) {
+        noteEntrySaved();
         if (out.forecast) applyForecast(out.forecast);
         refreshRecent();
       }

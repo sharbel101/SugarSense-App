@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useSyncExternalStore } from 'react';
 import { useForecast } from './ForecastProvider';
+import { devLog } from './devLog';
 import { useGlucose } from './GlucoseProvider';
 import {
   deserializeLastKnown,
   EMPTY_LAST_KNOWN,
+  markEntrySaved,
   mergeGlucose,
   mergeOnBoard,
   serializeLastKnown,
@@ -21,6 +23,11 @@ function set(next: LastKnown) {
   current = next;
   void AsyncStorage.setItem(KEY, serializeLastKnown(next)).catch(() => undefined);
   listeners.forEach((l) => l());
+}
+
+/** Call after an event is saved: until a newer forecast arrives, the remembered on-board amounts are out of date. */
+export function noteEntrySaved() {
+  set(markEntrySaved(current));
 }
 
 /** The last good reading and on-board amounts (possibly old: the screen must say so). */
@@ -73,7 +80,9 @@ export function LastKnownSync() {
   useEffect(() => {
     if (!fc) return;
     const a = fc.mealAware.availability;
-    set(mergeOnBoard(current, { insulinUnits: a.insulinOnBoardUnits, insulin: a.insulin, carbsGrams: a.carbsOnBoardGrams, asOf: fc.anchor.measuredAt }));
+    const next = mergeOnBoard(current, { insulinUnits: a.insulinOnBoardUnits, insulin: a.insulin, carbsGrams: a.carbsOnBoardGrams, generatedAt: fc.generatedAt });
+    devLog('last-known on-board', { carbsOnBoardGrams: a.carbsOnBoardGrams, insulinOnBoardUnits: a.insulinOnBoardUnits, generatedAt: fc.generatedAt, kept: next.onBoard?.generatedAt, replaced: next !== current });
+    set(next);
   }, [fc]);
 
   return null;

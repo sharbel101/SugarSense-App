@@ -41,6 +41,9 @@ export function reduceForecast(state: ForecastState, outcome: ForecastFetchOutco
 export function applyForecastResponse(state: ForecastState, r: ForecastDisplay, nowMs: number): ForecastState {
   switch (r.status) {
     case 'ok':
+      // An answer that was built EARLIER than the one we hold (a poll that started before a save and landed after
+      // it) must not replace it, or the screen would go back to amounts from before the person logged anything.
+      if (state.good && Date.parse(r.generatedAt) < Date.parse(state.good.data.generatedAt)) return state;
       return { loaded: true, good: { data: r, receivedAtMs: nowMs }, problem: null };
     case 'baseline_unavailable':
       return { loaded: true, good: null, problem: { kind: 'baseline_unavailable', data: r } };
