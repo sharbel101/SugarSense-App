@@ -34,7 +34,7 @@ vi.mock('@google/genai', () => {
     GoogleGenAI,
     ApiError: hoisted.MockApiError,
     PartMediaResolutionLevel: { MEDIA_RESOLUTION_HIGH: 'MEDIA_RESOLUTION_HIGH' },
-    ThinkingLevel: { HIGH: 'HIGH' },
+    ThinkingLevel: { MINIMAL: 'MINIMAL', LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH' },
     createPartFromBase64: (data: string, mimeType: string) => ({ inlineData: { data, mimeType } }),
     createPartFromText: (text: string) => ({ text }),
     createUserContent: (parts: unknown[]) => ({ role: 'user', parts }),
@@ -160,5 +160,83 @@ describe('GeminiMealVisionProvider (security boundary: no API key material ever 
     });
 
     expect(result).toEqual({ rawText: '{"ok":true}', modelVersion: 'gemini-3.8-flash-001' });
+  });
+});
+
+describe('GeminiMealVisionProvider latency controls', () => {
+  const images = [{ base64Data: 'ZmFrZQ==', mimeType: 'image/jpeg' as const }];
+  beforeEach(() => {
+    hoisted.generateContent.mockReset();
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+  });
+
+  it('uses MEDIUM reasoning, a per-call timeout and a cancel signal by default; env can change them; junk falls back to the defaults', async () => {
+    hoisted.generateContent.mockResolvedValue({ text: '{}' });
+    await new GeminiMealVisionProvider(fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY })).analyzeMealPhoto({ images });
+    const cfg = hoisted.generateContent.mock.calls[0]![0].config as { thinkingConfig: { thinkingLevel: string }; httpOptions: { timeout: number }; abortSignal: AbortSignal };
+    expect(cfg.thinkingConfig.thinkingLevel).toBe('MEDIUM');
+    expect(cfg.httpOptions.timeout).toBe(30_000);
+    expect(cfg.abortSignal).toBeInstanceOf(AbortSignal);
+
+    hoisted.generateContent.mockClear();
+    await new GeminiMealVisionProvider(fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_THINKING_LEVEL: 'low', GEMINI_CALL_TIMEOUT_MS: '12000' })).analyzeMealPhoto({ images });
+    const cfg2 = hoisted.generateContent.mock.calls[0]![0].config as { thinkingConfig: { thinkingLevel: string }; httpOptions: { timeout: number } };
+    expect([cfg2.thinkingConfig.thinkingLevel, cfg2.httpOptions.timeout]).toEqual(['LOW', 12_000]);
+
+    hoisted.generateContent.mockClear();
+    await new GeminiMealVisionProvider(fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_THINKING_LEVEL: 'ultra', GEMINI_CALL_TIMEOUT_MS: '-5' })).analyzeMealPhoto({ images });
+    const cfg3 = hoisted.generateContent.mock.calls[0]![0].config as { thinkingConfig: { thinkingLevel: string }; httpOptions: { timeout: number } };
+    expect([cfg3.thinkingConfig.thinkingLevel, cfg3.httpOptions.timeout]).toEqual(['MEDIUM', 30_000]);
+  });
+
+  it('starts the fallback in parallel when the primary is slow, returns the first answer and cancels the loser', async () => {
+    let primarySignal: AbortSignal | undefined;
+    hoisted.generateContent.mockImplementation((req: { model: string; config: { abortSignal: AbortSignal } }) => {
+      if (req.model === 'primary-model') {
+        primarySignal = req.config.abortSignal;
+        return new Promise((resolve, reject) => {
+          const t = setTimeout(() => resolve({ text: '{"from":"primary"}' }), 400);
+          req.config.abortSignal.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(new Error('aborted'));
+          });
+        });
+      }
+      return Promise.resolve({ text: '{"from":"fallback"}' });
+    });
+    const provider = new GeminiMealVisionProvider(
+      fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_MODEL: 'primary-model', GEMINI_FALLBACK_MODEL: 'fallback-model', GEMINI_HEDGE_MS: '30' }),
+    );
+    const t0 = Date.now();
+    const result = await provider.analyzeMealPhoto({ images });
+    expect(result).toEqual({ rawText: '{"from":"fallback"}', modelVersion: 'fallback-model' });
+    expect(Date.now() - t0).toBeLessThan(300);
+    expect(primarySignal?.aborted).toBe(true);
+  });
+
+  it('a primary that answers before the hedge delay never starts the fallback', async () => {
+    hoisted.generateContent.mockResolvedValue({ text: '{"ok":1}' });
+    const provider = new GeminiMealVisionProvider(
+      fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_MODEL: 'primary-model', GEMINI_FALLBACK_MODEL: 'fallback-model', GEMINI_HEDGE_MS: '500' }),
+    );
+    await provider.analyzeMealPhoto({ images });
+    expect(hoisted.generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a timeout on the primary counts as transient and uses the fallback; both failing reports an error without secrets', async () => {
+    hoisted.generateContent
+      .mockRejectedValueOnce(new Error(`request timed out key=${FAKE_API_KEY}`))
+      .mockResolvedValueOnce({ text: '{"ok":2}' });
+    const provider = new GeminiMealVisionProvider(
+      fakeConfigService({ GEMINI_API_KEY: FAKE_API_KEY, GEMINI_MODEL: 'primary-model', GEMINI_FALLBACK_MODEL: 'fallback-model' }),
+    );
+    expect((await provider.analyzeMealPhoto({ images })).modelVersion).toBe('fallback-model');
+
+    hoisted.generateContent.mockReset();
+    hoisted.generateContent.mockRejectedValue(new hoisted.MockApiError({ message: 'high demand', status: 503 }));
+    const err = await provider.analyzeMealPhoto({ images }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MealVisionApiError);
+    expect(String((err as Error).message)).not.toContain(FAKE_API_KEY);
   });
 });
