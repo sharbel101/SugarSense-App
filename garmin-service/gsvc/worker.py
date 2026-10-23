@@ -4,7 +4,8 @@
     About 5 requests per cycle, a few hundred a day. The watch only syncs in batches, so polling faster would just return the same answer.
   * Rate limited (429) or Garmin down: exponential backoff (never faster than configured because requests succeed). Key rejected: polling pauses (state/AUTH_FAILED) until a
     person fixes the key and runs `python -m gsvc.cli resume`. Nothing here can sign in anywhere; the key only reads.
-  * The frontend never triggers a fetch: the API only reads the database.
+  * Pressing refresh in the app runs `Worker.refresh()` (through POST /refresh in the API process): everything is fetched right now, with no schedule or minimum gap.
+    The background loop only keeps the database warm for the insights engine; it can be switched off (GARMIN_POLLING_ENABLED=false) and refresh still works.
 """
 from __future__ import annotations
 
@@ -57,8 +58,9 @@ class Worker:
     def flag(self, name: str) -> Path:
         return self.s.state_dir / name
 
-    def paused_reason(self) -> str | None:
-        if not self.s.polling_enabled:
+    def paused_reason(self, manual: bool = False) -> str | None:
+        """`manual` = a refresh pressed in the app: it works even when background polling is switched off, but never without a key or after a rejected key."""
+        if not manual and not self.s.polling_enabled:
             return "disabled (GARMIN_POLLING_ENABLED is not true)"
         if not self.s.personal_api_key:
             return "no Personal API key (GARMIN_PERSONAL_API_KEY is not set)"
@@ -101,16 +103,20 @@ class Worker:
         return last is None or now - last >= timedelta(minutes=call.every_min)
 
     # ------------------------------------------------------------------ one cycle
-    def run_cycle(self) -> dict:
+    def run_cycle(self, manual: bool = False) -> dict:
+        """One pass over the plan. `manual` (a person pressed refresh) fetches EVERYTHING now, ignoring the slow-call schedule, and a transient Garmin
+        error never starts a long backoff (only a 429 does, for as long as Garmin asks)."""
         now = self.now()
         if self.backoff_until and now < self.backoff_until:
-            return {"ran": [], "note": f"backing off until {self.backoff_until.isoformat(timespec='seconds')}"}
+            return {"ran": [], "requests": 0, "rows_new": 0, "failed": [], "backoff_until": self.backoff_until, "note": f"backing off until {self.backoff_until.isoformat(timespec='seconds')}"}
         self.counters["cycles"] += 1
         outcomes: dict[str, dict] = {}  # group -> {"rows": [...], "outcome": ..., "requests": n, ...}
         ran: list[str] = []
+        failed: list[str] = []
+        requests = rows_new = 0
         stop = False
         for call in self.plan(now):
-            if not self._due(call, now):
+            if not manual and not self._due(call, now):
                 continue
             started = self.now()
             rec = RunRecord(call.name, started, "ok")
@@ -127,7 +133,8 @@ class Worker:
                 rec.error_class, rec.error_text = "ApiError", f"{e.kind} {e.status}"
                 rec.outcome = {"auth": "auth_failed", "rate_limited": "rate_limited"}.get(e.kind, "error")
                 self.counters["errors"] += 1
-                stop = self._after_failure(e) or stop
+                failed.append(e.kind)
+                stop = self._after_failure(e, manual) or stop
             new = changed = 0
             if rows:
                 new, changed = self.store.upsert_observations(rows, self.now())
@@ -138,6 +145,8 @@ class Worker:
             rec.duration_ms = int((rec.finished_at - started).total_seconds() * 1000)
             self.store.record_run(rec)
             self.counters["rows_new"] += new
+            requests += rec.requests
+            rows_new += new
             if call.every_min is not None and rec.outcome not in ("error", "rate_limited", "auth_failed"):
                 self.last_run[call.path.split("?")[0] + str(call.day)] = now
             ran.append(call.name)
@@ -156,13 +165,39 @@ class Worker:
         if not stop and outcomes and all(a["outcome"] not in ("error", "rate_limited", "auth_failed") for a in outcomes.values()):
             self.fail_streak = 0
             self.backoff_until = None
-        return {"ran": ran}
+        return {"ran": ran, "requests": requests, "rows_new": rows_new, "failed": failed, "backoff_until": self.backoff_until if self.backoff_until and self.backoff_until > self.now() else None}
 
-    def _after_failure(self, e: ApiError) -> bool:
+    def refresh(self) -> dict:
+        """What the app's refresh button runs: a full fetch right now. Returns {ok, outcome, requests, rows_new, ...}; never raises for a Garmin problem."""
+        reason = self.paused_reason(manual=True)
+        if reason:
+            return {"ok": False, "outcome": "paused", "message": reason, "requests": 0, "rows_new": 0}
+        res = self.run_cycle(manual=True)
+        failed = res["failed"]
+        until = res.get("backoff_until")
+        if "auth" in failed:
+            outcome = "auth_failed"
+        elif until or "rate_limited" in failed:
+            outcome = "rate_limited"
+        elif failed and len(failed) >= len(res["ran"]):
+            outcome = "unavailable"
+        elif failed:
+            outcome = "partial"
+        else:
+            outcome = "ok"
+        return {"ok": outcome in ("ok", "partial"), "outcome": outcome, "requests": res["requests"], "rows_new": res["rows_new"], "retry_at": until}
+
+    def _after_failure(self, e: ApiError, manual: bool = False) -> bool:
         """Returns True when the cycle must stop."""
         if e.kind == "auth":
             self._set_flag(AUTH_FAILED_FILE, str(e))
             return True
+        if manual:
+            if e.kind == "rate_limited":
+                self.counters["rate_limits"] += 1
+                self.backoff_until = self.now() + timedelta(seconds=min(BACKOFF_CAP_S, max(60, e.retry_after or 0)))
+                return True
+            return e.kind == "transient"  # stop on a Garmin outage, but no backoff: pressing refresh again just tries again
         self.fail_streak += 1
         if e.kind == "rate_limited":
             self.counters["rate_limits"] += 1

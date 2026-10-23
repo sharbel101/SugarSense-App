@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { garminErrorText, type GarminError } from '../api/garminContract';
@@ -15,7 +15,6 @@ import { TabScreenProps } from '../navigation/types';
 import { formatIsoTime12 } from '../services/clock12';
 import { useWearable } from '../services/useWearable';
 import {
-  ageText,
   DAY,
   formatNumber,
   formatSleep,
@@ -46,14 +45,8 @@ function startOfDay(ms: number): number {
 export function WearableScreen({ navigation }: TabScreenProps<'Wearable'>) {
   const colors = useColors();
   const bottomPad = useTabScreenBottomPadding();
-  const { data, now, refresh, loading, error, live, updatedAt, historyIncomplete } = useWearable();
+  const { data, now, refresh, loading, error, live, historyIncomplete, syncProblem } = useWearable();
   const [refreshing, setRefreshing] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (!notice) return;
-    const id = setTimeout(() => setNotice(null), 6000);
-    return () => clearTimeout(id);
-  }, [notice]);
 
   // Demo data re-reads when the tab opens so ages are current; live data refreshes itself while the screen is focused.
   useFocusEffect(
@@ -61,16 +54,12 @@ export function WearableScreen({ navigation }: TabScreenProps<'Wearable'>) {
       if (!live) refresh();
     }, [live, refresh]),
   );
-  // Pulling down asks for fresh data, but the API is called at most once every 6 minutes: otherwise say so.
+  // Pulling down makes the server read Garmin right now (every pull is a new Garmin call).
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    const r = refresh();
-    if (!r.started && r.waitMs > 0) {
-      const mins = Math.max(1, Math.ceil(r.waitMs / 60_000));
-      setNotice(`Already up to date${updatedAt ? ` (updated ${ageText((Date.now() - updatedAt) / 60_000)})` : ''}. You can refresh again in ${mins} min.`);
-    } else setNotice(null);
+    refresh();
     setTimeout(() => setRefreshing(false), 700);
-  }, [refresh, updatedAt]);
+  }, [refresh]);
 
   const dateText = new Date(now).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -91,9 +80,9 @@ export function WearableScreen({ navigation }: TabScreenProps<'Wearable'>) {
         refreshing={refreshing}
         contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: bottomPad, gap: 14 }}
       >
-        {notice ? (
+        {syncProblem ? (
           <View accessibilityRole="alert" style={{ backgroundColor: colors.divider, borderRadius: radius.row, padding: 12 }}>
-            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{notice}</Text>
+            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.ink }}>{syncProblem}</Text>
           </View>
         ) : null}
         {data === null ? (

@@ -1,7 +1,7 @@
 # Garmin metrics service (official Personal API poller + read-only API)
 
 `gsvc/` reads your Garmin data from **Garmin's official Personal API** and stores it in PostgreSQL (migration `backend/db/migrations/0011_garmin_metrics.sql`).
-A second, separate process serves the stored data at `/api/garmin/v1/*` (default `127.0.0.1:8310`, reached only through nginx). The API never calls Garmin.
+A second, separate process serves the stored data at `/api/garmin/v1/*` (default `127.0.0.1:8310`, reached only through nginx). Every GET answers from the database; the one route that reaches Garmin is `POST /refresh`, which the app calls each time you open the Wearable screen or pull to refresh (see below).
 Frontend contract: `MASTER-PROMPT-GARMIN-FRONTEND.md`.
 
 There is nothing to sign in to: you create one **Personal API key** in Garmin Connect (Settings > Personal API token). The poller exchanges it for a 24 h bearer
@@ -13,7 +13,7 @@ token (renewed automatically) and makes read-only GET requests. No password, no 
 |---|---|---|
 | heart rate (about every 2 min), day summary (steps, distance, intensity minutes, active calories, stress average, SpO2, respiration) | body battery, last night's sleep, overnight HRV | the 10 latest exercise sessions |
 
-Shortly after midnight the previous day is fetched too. The watch only syncs in batches, so polling faster returns the same answer; the interval cannot be set below 5 minutes.
+**Refresh on demand.** `POST /api/garmin/v1/refresh` (same token) fetches all of the above right now, stores it and answers `{ok, outcome, requests, rows_new}`; the app then reloads from the database. There is no time limit between presses (a double tap within 3 s shares one fetch). `outcome` is `ok`, `partial`, `unavailable`, `rate_limited` (Garmin asked us to wait; `retry_at` says until when), `auth_failed` or `paused`. It works even if the background loop is off. Shortly after midnight the previous day is fetched too. The watch only syncs in batches, so polling faster returns the same answer; the interval cannot be set below 5 minutes.
 
 What is **not** available from this API (checked against real answers): steps per 15 minutes, a stress score across the day, activity level, beat-to-beat intervals, skin
 temperature. The catalogue (`GET /metrics`) lists what exists and `UNSUPPORTED` says why the rest does not.

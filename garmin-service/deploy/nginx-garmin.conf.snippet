@@ -9,10 +9,10 @@ location /api/garmin/ {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
-    proxy_read_timeout 15s;
-    proxy_send_timeout 15s;
+    proxy_read_timeout 40s;   # POST /refresh makes a live round trip to Garmin (about 7 requests)
+    proxy_send_timeout 40s;
     client_max_body_size 4k;
     proxy_buffering on;
     proxy_max_temp_file_size 0;
-    limit_except GET { deny all; }
+    limit_except GET POST { deny all; }   # POST is only /refresh; the API rejects POST anywhere else
 }

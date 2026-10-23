@@ -10,7 +10,7 @@ You are the SugarSense frontend AI (`mobile/`, React Native + Expo + TypeScript)
 
 ## Hard rules
 - Never contact Garmin, and never store Garmin credentials. Only call the SugarSense Garmin API below.
-- Polling this API is free: it only reads our database and never triggers a Garmin request. You may refresh every 60 s while the screen is visible, and not at all in the background.
+- Every GET on this API is free: it only reads our database. You may re-read every 60 s while the screen is visible, and not at all in the background. The one call that makes the server read Garmin is `POST /refresh` (same token): send it when the screen opens and on every pull-to-refresh / Retry, with no client-side time limit, no retry and a 30 s timeout, then reload with the GETs. Its answer `{ok, outcome, requests, rows_new, retry_at}` is never an error screen: if `ok` is false keep showing the stored data and say in one sentence that Garmin could not be refreshed.
 - Measured activity and heart rate are shown as measurements with their age. NEVER present elevated heart rate, activity or stress as proof of low glucose, and never merge them into any hypoglycaemia-risk number; keep them visually separate from model-estimated risk. Garmin does not measure glucose.
 - Copy: "Measured by your Garmin watch", "last synced X ago". Not medical advice.
 

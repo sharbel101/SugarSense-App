@@ -1,5 +1,5 @@
 [Unit]
-Description=SugarSense Garmin metrics API (read-only, localhost only)
+Description=SugarSense Garmin metrics API (localhost only; refresh fetches from Garmin on demand)
 After=network.target postgresql@16-main.service
 
 [Service]
@@ -14,3 +14,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/garmin-mcp/state

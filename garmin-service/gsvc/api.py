@@ -1,10 +1,12 @@
-"""Read-only JSON API over the stored Garmin metrics. It NEVER calls Garmin: every answer comes from the local database.
+"""JSON API over the stored Garmin metrics. Every GET answers from the local database and never calls Garmin. The only route that reaches Garmin is POST /refresh,
+which runs one fetch right now because a person pressed refresh in the app (it needs the worker database role and the Personal API key; without them it answers 503).
 
   GET /api/garmin/v1/health          liveness of this process (no auth, no database)
   GET /api/garmin/v1/metrics         catalogue of metrics, what is unsupported and why
   GET /api/garmin/v1/metrics/latest  newest observation per metric with freshness
   GET /api/garmin/v1/metrics/history bounded, chronological observations (cursor paging)
   GET /api/garmin/v1/status          polling / backoff / staleness / sanitised errors
+  POST /api/garmin/v1/refresh        fetch from Garmin now (one round trip per press), store it, report {ok, outcome, requests, rows_new}
 
 Everything except /health needs the shared token in `x-app-token` (or `Authorization: Bearer`). With no token configured the data routes refuse (503): fail closed.
 This token only keeps scanners out; like the other SugarSense routes it is NOT per-user authentication (a token inside a public web build is visible).
@@ -136,7 +138,7 @@ def thin_rows(rows, max_points: int):
     return [r for r in rows if id(r) in keep], thinned
 
 
-def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.utc)) -> Starlette:
+def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.utc), refresher=None) -> Starlette:
     limiter = RateLimiter(settings.rate_per_minute)
 
     def guard(request: Request) -> None:
@@ -365,23 +367,31 @@ def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.u
             headers=_headers(),
         )
 
+    def refresh(request: Request) -> Response:
+        if refresher is None:
+            raise ApiError(503, "refresh_not_configured", "this server cannot fetch from Garmin on demand (no Personal API key or worker database role is configured)")
+        res = refresher.refresh()
+        return JSONResponse({"source": "garmin", "generated_at": iso(now_fn()), "ok": res["ok"], "outcome": res["outcome"], "requests": res.get("requests", 0), "rows_new": res.get("rows_new", 0),
+                             "retry_at": iso(res.get("retry_at")), "message": scrub(res.get("message")), "shared": bool(res.get("shared"))}, headers=_headers())
+
     routes = [
         Route(f"{PREFIX}/health", health, methods=["GET"]),
         Route(f"{PREFIX}/metrics", wrap(catalogue), methods=["GET"]),
         Route(f"{PREFIX}/metrics/latest", wrap(latest), methods=["GET"]),
         Route(f"{PREFIX}/metrics/history", wrap(history), methods=["GET"]),
         Route(f"{PREFIX}/status", wrap(status), methods=["GET"]),
+        Route(f"{PREFIX}/refresh", wrap(refresh), methods=["POST"]),
     ]
     middleware = []
     if settings.cors_origins:
-        middleware.append(Middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "OPTIONS"], allow_headers=["x-app-token", "authorization", "content-type"], max_age=600))
+        middleware.append(Middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["x-app-token", "authorization", "content-type"], max_age=600))
     app = Starlette(routes=routes, middleware=middleware)
 
     async def not_found(request, exc):
         return error_response(404, "not_found", "no such route")
 
     async def method_not_allowed(request, exc):
-        return error_response(405, "method_not_allowed", "this API is read-only (GET)")
+        return error_response(405, "method_not_allowed", "this method is not allowed on this route (reads are GET, refresh is POST)")
 
     app.add_exception_handler(404, not_found)
     app.add_exception_handler(405, method_not_allowed)
@@ -400,7 +410,14 @@ def main() -> None:  # pragma: no cover - process entry point
         raise SystemExit("GARMIN_API_DATABASE_URL is not set")
     if s.host not in {"127.0.0.1", "::1", "localhost"}:
         raise SystemExit("GARMIN_API_HOST must be a loopback address; nginx is the only public entry point")
-    uvicorn.run(create_app(s, PgStore(s.api_db_url)), host=s.host, port=s.port, log_level="warning", proxy_headers=False, server_header=False)
+    refresher = None
+    if s.worker_db_url and s.personal_api_key:  # on-demand refresh: the only write path of this process, through the worker role
+        from .personal import PersonalClient
+        from .refresh import Refresher
+        from .worker import Worker
+
+        refresher = Refresher(Worker(s, PgStore(s.worker_db_url), PersonalClient(s.personal_api_key)).refresh)
+    uvicorn.run(create_app(s, PgStore(s.api_db_url), refresher=refresher), host=s.host, port=s.port, log_level="warning", proxy_headers=False, server_header=False)
 
 
 if __name__ == "__main__":  # pragma: no cover

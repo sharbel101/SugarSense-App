@@ -170,3 +170,51 @@ def test_heartbeat_carries_the_fields_the_status_route_reads():
     w.heartbeat(None, "ok")
     extra = st.all_states()["_worker"]["extra"]
     assert extra["gate"]["backoff_until"] is None and extra["intervals"]["fast_min"] == 10 and extra["counters"]["requests"] > 0
+
+
+# ------------------------------------------------------------------ on-demand refresh (the app's refresh button)
+def test_manual_refresh_fetches_everything_now_even_when_the_slow_calls_are_not_due(tmp_path):
+    w, st, clock = make(tmp=tmp_path)
+    w.run_cycle()
+    first = len(w.client.paths)
+    clock[0] += timedelta(minutes=1)                       # the 30-minute calls are not due, but a person pressed refresh
+    assert len(w.client.paths) == first
+    res = w.refresh()
+    assert res["ok"] and res["outcome"] == "ok" and res["requests"] == len(w.client.paths) - first and res["requests"] >= 6
+    assert any("hrv-service" in p for p in w.client.paths[first:]) and any("dailySleep" in p for p in w.client.paths[first:])
+
+
+def test_manual_refresh_works_with_background_polling_off_but_not_without_a_key(tmp_path):
+    w, _, _ = make(env={"GARMIN_POLLING_ENABLED": "false"}, tmp=tmp_path)
+    assert w.refresh()["ok"]
+    w2, _, _ = make(env={"GARMIN_PERSONAL_API_KEY": ""}, tmp=tmp_path)
+    r = w2.refresh()
+    assert not r["ok"] and r["outcome"] == "paused" and "key" in r["message"]
+
+
+def test_manual_refresh_garmin_outage_has_no_backoff_so_pressing_again_retries(tmp_path):
+    ans = good()
+    ans["dailyHeartRate"] = ApiError("transient", 503)
+    w, _, _ = make(client=FakeClient(ans), tmp=tmp_path)
+    r = w.refresh()
+    assert not r["ok"] and r["outcome"] == "unavailable" and w.backoff_until is None
+    ans["dailyHeartRate"] = good()["dailyHeartRate"]
+    assert w.refresh()["outcome"] == "ok"
+
+
+def test_manual_refresh_rate_limit_is_reported_with_a_retry_time(tmp_path):
+    ans = good()
+    ans["dailyHeartRate"] = ApiError("rate_limited", 429, retry_after=120)
+    w, _, _ = make(client=FakeClient(ans), tmp=tmp_path)
+    r = w.refresh()
+    assert not r["ok"] and r["outcome"] == "rate_limited" and r["retry_at"] is not None
+    assert w.refresh()["outcome"] == "rate_limited"          # still inside Garmin's Retry-After: not hammered
+
+
+def test_manual_refresh_rejected_key_sets_the_flag_and_says_so(tmp_path):
+    ans = good()
+    ans["dailyHeartRate"] = ApiError("auth", 401)
+    w, _, _ = make(client=FakeClient(ans), tmp=tmp_path)
+    r = w.refresh()
+    assert r["outcome"] == "auth_failed" and (tmp_path / AUTH_FAILED_FILE).exists()
+    assert w.refresh()["outcome"] == "paused"

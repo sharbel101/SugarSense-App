@@ -350,17 +350,30 @@ test('daily values are one per LOCAL day across the DST change', () => {
   assert.deepEqual(d.series.hrv.map((x) => x.v), [50, 52, 54]);
 });
 
-/* ------------------------------------------------------------- refresh limit */
+/* ------------------------------------------------------------- refresh = a new Garmin call every time */
 
-test('refresh gate: one call per 6 minutes after a good refresh; 1 minute after a failed one', async () => {
-  const { refreshGate, REFRESH_MIN_MS } = await import('../src/services/garminLoad.ts');
-  assert.deepEqual(refreshGate(null, NOW), { allowed: true, waitMs: 0 });
-  assert.equal(REFRESH_MIN_MS, 6 * 60_000);
-  const ok = { at: NOW, ok: true };
-  assert.equal(refreshGate(ok, NOW + 5 * 60_000 + 59_000).allowed, false);
-  assert.equal(refreshGate(ok, NOW + 60_000).waitMs, 5 * 60_000);
-  assert.equal(refreshGate(ok, NOW + 6 * 60_000).allowed, true);
-  const bad = { at: NOW, ok: false };
-  assert.equal(refreshGate(bad, NOW + 30_000).allowed, false);
-  assert.equal(refreshGate(bad, NOW + 60_000).allowed, true);
+const refreshBody = (over = {}) => ({ source: 'garmin', generated_at: iso(0), ok: true, outcome: 'ok', requests: 7, rows_new: 3, retry_at: null, message: null, shared: false, ...over });
+
+test('every refresh press is its own POST /refresh: no 6-minute limit, no retry, token sent', async () => {
+  const { requestRefresh } = await import('../src/api/garminContract.ts');
+  const { refreshFromGarmin } = await import('../src/services/garminLoad.ts');
+  const f = fake([res(refreshBody()), res(refreshBody()), res(refreshBody())]);
+  const cfg = { baseUrl: 'https://x/api/garmin/v1', token: 'tok', fetchImpl: f.impl, sleep: async () => {} };
+  for (let i = 0; i < 3; i++) assert.deepEqual(await refreshFromGarmin(cfg), { problem: null, aborted: false });   // three presses in a row
+  assert.equal(f.calls.length, 3);
+  assert.ok(f.calls.every((c) => c.init.method === 'POST' && c.url === 'https://x/api/garmin/v1/refresh' && c.init.headers['x-app-token'] === 'tok'));
+  const r = await requestRefresh({ ...cfg, fetchImpl: fake([res(refreshBody({ rows_new: 9 }))]).impl });
+  assert.ok(r.ok && r.data.requests === 7 && r.data.rowsNew === 9);
+});
+
+test('refresh problems become a sentence and never block the screen; a 503/old server is silent', async () => {
+  const { refreshFromGarmin } = await import('../src/services/garminLoad.ts');
+  const run = (answers) => refreshFromGarmin({ baseUrl: 'https://x', token: 't', fetchImpl: fake(answers).impl, sleep: async () => {} });
+  assert.match((await run([res(refreshBody({ ok: false, outcome: 'rate_limited' }))])).problem, /slow down/);
+  assert.match((await run([res(refreshBody({ ok: false, outcome: 'auth_failed' }))])).problem, /rejected/);
+  assert.match((await run([res(refreshBody({ ok: false, outcome: 'unavailable' }))])).problem, /could not be reached/);
+  assert.match((await run([res(refreshBody({ ok: true, outcome: 'partial' }))])).problem, /Some Garmin data/);
+  assert.equal((await run([res({ error: { code: 'refresh_not_configured' } }, 503)])).problem, null);
+  assert.match((await run([res({}, 500)])).problem, /Showing the last data/);
+  assert.match((await run([res({ nonsense: true })])).problem, /Showing the last data/);
 });

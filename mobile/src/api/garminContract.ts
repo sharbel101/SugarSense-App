@@ -1,7 +1,7 @@
 /**
  * Client contract for the SugarSense Garmin metrics API (`/api/garmin/v1`, see
- * garmin-service/MASTER-PROMPT-GARMIN-FRONTEND.md). Read-only: it only reads OUR database and never asks
- * Garmin for anything. Pure (no imports; fetch, clock and sleep are injected) so plain Node can test it.
+ * garmin-service/MASTER-PROMPT-GARMIN-FRONTEND.md). Every GET only reads OUR database; the one POST (`requestRefresh`) makes the
+ * server fetch from Garmin right now because the person pressed refresh. Pure (no imports; fetch, clock and sleep are injected) so plain Node can test it.
  *
  * Rules: timestamps are UTC ISO strings and stay UTC here (local time only when displaying); a missing metric
  * is absent, never 0; a malformed entry is dropped rather than repaired; every failure becomes a typed result,
@@ -253,6 +253,75 @@ export async function garminGet<T>(
     }
   }
   return last;
+}
+
+export interface RefreshResult {
+  ok: boolean;
+  /** ok | partial | unavailable | rate_limited | auth_failed | paused */
+  outcome: string;
+  requests: number;
+  rowsNew: number;
+  retryAt: string | null;
+  message: string | null;
+}
+
+export const REFRESH_TIMEOUT_MS = 30_000;
+
+/**
+ * Ask the server to fetch from Garmin NOW (`POST /refresh`). One attempt, no retry (a retry would be a second Garmin call),
+ * 30 s timeout. A Garmin-side problem arrives as `{ ok: true, data: { ok: false, outcome } }`; only a transport/auth failure is an error result.
+ */
+export async function requestRefresh(cfg: GarminConfig, signal?: AbortSignal): Promise<GarminResult<RefreshResult>> {
+  if (!cfg.token) return { ok: false, error: 'not_configured' };
+  if (signal?.aborted) return { ok: false, error: 'aborted' };
+  const fetchImpl = cfg.fetchImpl ?? (fetch as unknown as FetchLike);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, Math.max(cfg.timeoutMs ?? 0, REFRESH_TIMEOUT_MS));
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    const res = await fetchImpl(`${cfg.baseUrl}/refresh`, { method: 'POST', headers: { Accept: 'application/json', ...(cfg.extraHeaders ?? {}), 'x-app-token': cfg.token }, cache: 'no-store', signal: controller.signal });
+    if (!res.ok) return { ok: false, error: statusToError(res.status), status: res.status };
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      return { ok: false, error: 'bad_body' };
+    }
+    if (!isRec(body) || typeof body.ok !== 'boolean' || typeof body.outcome !== 'string') return { ok: false, error: 'bad_body' };
+    return {
+      ok: true,
+      data: { ok: body.ok, outcome: body.outcome, requests: num(body.requests) ?? 0, rowsNew: num(body.rows_new) ?? 0, retryAt: iso(body.retry_at), message: typeof body.message === 'string' ? body.message : null },
+    };
+  } catch {
+    if (timedOut) return { ok: false, error: 'timeout' };
+    return { ok: false, error: signal?.aborted ? 'aborted' : 'network' };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Plain-language text for a refresh that reached the server but not Garmin. `null` = nothing to tell the person. */
+export function refreshProblemText(r: RefreshResult): string | null {
+  switch (r.outcome) {
+    case 'ok':
+      return null;
+    case 'partial':
+      return 'Some Garmin data could not be refreshed. Showing what was received.';
+    case 'rate_limited':
+      return 'Garmin asked us to slow down, so this refresh was skipped. Showing the last data received.';
+    case 'auth_failed':
+      return 'Garmin rejected the SugarSense access key, so nothing could be refreshed. Showing the last data received.';
+    case 'paused':
+      return 'Refreshing from Garmin is switched off on the server. Showing the last data received.';
+    default:
+      return 'Garmin could not be reached just now. Showing the last data received.';
+  }
 }
 
 export const fetchLatest = (cfg: GarminConfig, signal?: AbortSignal) => garminGet(cfg, '/metrics/latest', {}, parseLatest, signal);

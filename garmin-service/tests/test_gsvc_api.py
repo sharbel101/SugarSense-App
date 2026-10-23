@@ -216,3 +216,51 @@ def test_invalid_max_points_is_a_400(v):
     c, _ = make()
     r = c.get(f"{PREFIX}/metrics/history?metrics=heart_rate&max_points={v}", headers=H)
     assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_parameter"
+
+
+# ------------------------------------------------------------------ POST /refresh
+from gsvc.refresh import Refresher
+
+
+class FakeRefresh:
+    def __init__(self, result=None):
+        self.n, self.result = 0, result or {"ok": True, "outcome": "ok", "requests": 7, "rows_new": 12}
+
+    def refresh(self):
+        self.n += 1
+        return dict(self.result, shared=False)
+
+
+def test_refresh_needs_the_token_and_post(  ):
+    s = load_settings({"GARMIN_API_TOKEN": TOKEN}, env_file=None)
+    c = TestClient(create_app(s, MemStore(), now_fn=lambda: NOW, refresher=FakeRefresh()))
+    assert c.post(f"{PREFIX}/refresh").status_code == 401
+    assert c.get(f"{PREFIX}/refresh", headers=H).status_code == 405
+    r = c.post(f"{PREFIX}/refresh", headers=H)
+    assert r.status_code == 200 and r.json()["ok"] is True and r.json()["requests"] == 7 and r.headers["cache-control"] == "no-store"
+
+
+def test_refresh_without_a_key_is_503_and_other_routes_stay_get_only():
+    c, _ = make()
+    r = c.post(f"{PREFIX}/refresh", headers=H)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "refresh_not_configured"
+    assert c.post(f"{PREFIX}/metrics/latest", headers=H).status_code == 405
+
+
+def test_refresh_failure_is_reported_not_raised():
+    s = load_settings({"GARMIN_API_TOKEN": TOKEN}, env_file=None)
+    fr = FakeRefresh({"ok": False, "outcome": "rate_limited", "requests": 1, "rows_new": 0, "retry_at": NOW + timedelta(minutes=2)})
+    c = TestClient(create_app(s, MemStore(), now_fn=lambda: NOW, refresher=fr))
+    j = c.post(f"{PREFIX}/refresh", headers=H).json()
+    assert j["ok"] is False and j["outcome"] == "rate_limited" and j["retry_at"].startswith("2026-10-21T09:02")
+
+
+def test_refresher_makes_a_new_fetch_per_press_but_shares_a_double_tap():
+    t = [100.0]
+    calls = []
+    r = Refresher(lambda: calls.append(1) or {"ok": True, "outcome": "ok"}, clock=lambda: t[0])
+    assert r.refresh()["shared"] is False
+    t[0] += 1.0
+    assert r.refresh()["shared"] is True and len(calls) == 1      # double tap: one Garmin round trip
+    t[0] += 10.0
+    assert r.refresh()["shared"] is False and len(calls) == 2    # a real second press: a new Garmin call

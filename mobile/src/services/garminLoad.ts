@@ -1,7 +1,7 @@
-import { fetchHistory, fetchLatest, fetchStatus, type GarminConfig, type GarminError, type GarminLatest, type GarminObservation, type GarminResult, type GarminStatus } from '../api/garminContract.ts';
+import { fetchHistory, fetchLatest, fetchStatus, garminErrorText, requestRefresh, refreshProblemText, type GarminConfig, type GarminError, type GarminLatest, type GarminObservation, type GarminResult, type GarminStatus } from '../api/garminContract.ts';
 import { historyWindows, type GarminSnapshot } from './garminAdapter.ts';
 
-/** Everything except `latest` and `status` changes slowly; reload it at most this often. */
+/** Between refreshes the screen re-reads our database; the history behind the charts is reloaded at most this often (a refresh always reloads it). */
 export const HISTORY_REFRESH_MS = 5 * 60_000;
 /** The history calls are the big ones and run over a tunnel: give them longer than the default 10 s. */
 export const HISTORY_TIMEOUT_MS = 30_000;
@@ -80,15 +80,14 @@ export async function loadGarmin(
   };
 }
 
-/** Calls to the Garmin API are limited: after a good refresh the next one is allowed after this long. */
-export const REFRESH_MIN_MS = 6 * 60_000;
-/** After a FAILED refresh a retry is allowed sooner, so an error never locks the screen. */
-export const RETRY_AFTER_ERROR_MS = 60_000;
-
-/** May a refresh start now? `last` = the previous attempt. Pure. */
-export function refreshGate(last: { at: number; ok: boolean } | null, now: number): { allowed: boolean; waitMs: number } {
-  if (!last) return { allowed: true, waitMs: 0 };
-  const min = last.ok ? REFRESH_MIN_MS : RETRY_AFTER_ERROR_MS;
-  const waitMs = Math.max(0, last.at + min - now);
-  return { allowed: waitMs === 0, waitMs };
+/**
+ * A person pressed refresh: ask the server to read Garmin right now (no limit, every press is a new Garmin call), then the caller reloads our database.
+ * Returns the sentence to show when Garmin could not be refreshed, or `null` when it worked. The old data stays on screen either way.
+ */
+export async function refreshFromGarmin(cfg: GarminConfig, signal?: AbortSignal): Promise<{ problem: string | null; aborted: boolean }> {
+  const r = await requestRefresh(cfg, signal);
+  if (r.ok) return { problem: refreshProblemText(r.data), aborted: false };
+  if (r.error === 'aborted') return { problem: null, aborted: true };
+  if (r.error === 'not_configured' || r.status === 503) return { problem: null, aborted: false }; // an older server without /refresh: just show what it has
+  return { problem: r.error === 'timeout' ? 'Garmin took too long to answer. Showing the last data received.' : `${garminErrorText(r.error)} Showing the last data received.`, aborted: false };
 }
