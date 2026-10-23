@@ -1,5 +1,5 @@
 [Unit]
-Description=SugarSense Garmin poller (rate-limited, read-only, never signs in)
+Description=SugarSense Garmin poller (official Personal API, read-only)
 After=network-online.target postgresql@16-main.service
 StartLimitIntervalSec=900
 StartLimitBurst=5
@@ -16,4 +16,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/ubuntu/garmin-mcp/state /home/ubuntu/garmin-mcp/oauth /home/ubuntu/garmin-mcp
+ReadWritePaths=/home/ubuntu/garmin-mcp/state

@@ -250,7 +250,7 @@ test('loader: latest + status every time; history only when missing or older tha
   const first = await loadGarmin(cfg(f), NOW, null);
   assert.equal(first.ok, true);
   const historyCalls = urls.filter((u) => u.includes('/metrics/history')).length;
-  assert.equal(historyCalls, 5);
+  assert.equal(historyCalls, 4);
   urls.length = 0;
   const prev = { history: { heartRate: [], stepsToday: [], stressBattery: [], daily: [], exercises: [] }, at: NOW };
   await loadGarmin(cfg(f), NOW + 60_000, prev);
@@ -258,7 +258,7 @@ test('loader: latest + status every time; history only when missing or older tha
   assert.equal(urls.length, 2);
   urls.length = 0;
   await loadGarmin(cfg(f), NOW + 6 * 60_000, prev);
-  assert.equal(urls.filter((u) => u.includes('/metrics/history')).length, 5);
+  assert.equal(urls.filter((u) => u.includes('/metrics/history')).length, 4);
 });
 
 test('loader: a failed /metrics/latest is a typed error, never data', async () => {
@@ -297,8 +297,9 @@ test('history: the long series ask the server to thin them, the short ones do no
   assert.equal(r.ok, true);
   const q = (needle) => urls.filter((u) => u.includes(needle));
   assert.ok(q('metrics=heart_rate')[0].includes(`max_points=${CHART_POINTS}`));
-  assert.ok(q('stress_level')[0].includes(`max_points=${CHART_POINTS}`));
-  assert.ok(!q('steps_interval')[0].includes('max_points') && !q('resting_heart_rate')[0].includes('max_points') && !q('exercise_session')[0].includes('max_points'));
+  assert.ok(q('body_battery')[0].includes(`max_points=${CHART_POINTS}`));
+  assert.ok(!q('resting_heart_rate')[0].includes('max_points') && !q('exercise_session')[0].includes('max_points'));
+  assert.equal(q('steps_interval').length + q('stress_level').length, 0, 'metrics the API no longer has are not requested');
   assert.deepEqual(Object.keys(EMPTY_HISTORY).sort(), ['daily', 'exercises', 'heartRate', 'stepsToday', 'stressBattery']);
   assert.ok(EMPTY_HISTORY.heartRate.length === 0);
 });

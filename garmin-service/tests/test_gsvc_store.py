@@ -11,7 +11,7 @@ UTC = timezone.utc
 T0 = datetime(2026, 10, 21, 8, 0, tzinfo=UTC)
 
 
-def hr(minute, v, tool="get_heart_rates"):
+def hr(minute, v, tool="dailyHeartRate"):
     return Obs("heart_rate", T0 + timedelta(minutes=minute), "instant", value_num=v, source_tool=tool)
 
 
@@ -41,16 +41,16 @@ def test_inserting_the_same_measurement_twice_creates_one_row(store):
 
 
 def test_a_later_fetch_may_revise_but_an_older_one_never_overwrites_a_newer_one(store):
-    step = lambda v: Obs("steps_interval", T0, "interval_start", value_num=v, interval_s=900, source_tool="get_steps_data")
+    step = lambda v: Obs("steps_day_cumulative", T0, "period_end", value_num=v, period="local_day", period_date=date(2026, 10, 21), source_tool="dailysummaries")
     store.upsert_observations([step(11)], T0 + timedelta(minutes=10))
-    assert store.upsert_observations([step(40)], T0 + timedelta(minutes=17)) == (0, 1)  # the interval was still filling
+    assert store.upsert_observations([step(40)], T0 + timedelta(minutes=17)) == (0, 1)  # the day total grew
     assert store.upsert_observations([step(11)], T0 + timedelta(minutes=12)) == (0, 0)  # an older answer arrives late: ignored
-    row = store.latest_per_metric(["steps_interval"])[0]
+    row = store.latest_per_metric(["steps_day_cumulative"])[0]
     assert row.value_num == 40 and row.revisions == 1 and row.fetched_at == T0 + timedelta(minutes=17)
 
 
 def test_cumulative_values_are_separate_rows_and_never_added(store):
-    c = lambda m, v: Obs("steps_day_cumulative", T0 + timedelta(minutes=m), "period_end", value_num=v, period="local_day", period_date=date(2026, 10, 21), source_tool="get_user_summary")
+    c = lambda m, v: Obs("steps_day_cumulative", T0 + timedelta(minutes=m), "period_end", value_num=v, period="local_day", period_date=date(2026, 10, 21), source_tool="dailysummaries")
     store.upsert_observations([c(0, 1000), c(7, 1100)], T0)
     rows = store.history(["steps_day_cumulative"], T0 - timedelta(hours=1), T0 + timedelta(hours=1), 10)
     assert [r.value_num for r in rows] == [1000, 1100] and store.latest_per_metric(["steps_day_cumulative"])[0].value_num == 1100

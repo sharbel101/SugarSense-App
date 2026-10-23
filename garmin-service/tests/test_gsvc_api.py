@@ -23,8 +23,8 @@ def make(env=None, token=TOKEN, store=None):
 
 def seed(st: MemStore):
     obs = [
-        Obs("heart_rate", NOW - timedelta(minutes=20), "instant", value_num=66, source_tool="get_heart_rates"),
-        Obs("heart_rate", NOW - timedelta(minutes=22), "instant", value_num=70, source_tool="get_heart_rates"),
+        Obs("heart_rate", NOW - timedelta(minutes=20), "instant", value_num=66, source_tool="dailyHeartRate"),
+        Obs("heart_rate", NOW - timedelta(minutes=22), "instant", value_num=70, source_tool="dailyHeartRate"),
         Obs("steps_day_cumulative", NOW - timedelta(minutes=15), "period_end", value_num=1849, period="local_day", period_date=date(2026, 10, 21), source_tool="get_user_summary"),
         Obs("sleep_duration", NOW - timedelta(hours=40), "period_end", value_num=28560, period="night", period_date=date(2026, 10, 19), source_tool="get_sleep_summary"),
         Obs("sleep_stages", NOW - timedelta(hours=3), "period_end", value_json={"deep_sleep_seconds": 6120}, source_tool="get_sleep_summary"),
@@ -139,7 +139,7 @@ def test_status_shows_polling_staleness_counters_and_sanitised_errors():
 def test_status_reports_pause_backoff_and_a_dead_worker():
     c, st = make()
     seed(st)
-    st.put_state("_worker", extra={"paused_reason": "needs a manual gateway sign-in (NEEDS_LOGIN)", "gate": {}})
+    st.put_state("_worker", extra={"paused_reason": "Garmin rejected the Personal API key (state/AUTH_FAILED)", "gate": {}})
     assert c.get(PREFIX + "/status", headers=H).json()["polling"]["state"] == "paused"
     assert any("polling is not running" in w for w in c.get(PREFIX + "/metrics/latest", headers=H).json()["warnings"])
     st.put_state("_worker", extra={"paused_reason": None, "gate": {"backoff_until": "2026-10-21T09:05:00+00:00", "consecutive_failures": 1}})
@@ -178,12 +178,12 @@ def test_cors_is_closed_unless_explicit_origins_are_configured():
 def test_the_catalogue_lists_origins_and_the_unsupported_with_reasons():
     c, _ = make()
     j = c.get(PREFIX + "/metrics", headers=H).json()
-    assert j["metrics"]["stress_level"]["origin"] == "garmin_derived" and j["metrics"]["heart_rate"]["origin"] == "raw_sensor"
+    assert j["metrics"]["body_battery"]["origin"] == "garmin_derived" and j["metrics"]["heart_rate"]["origin"] == "raw_sensor"
     assert "glucose" in j["unsupported"] and "skin_temperature" in j["unsupported"]
 
 
 def _many_hr(st, n=300):
-    st.upsert_observations([Obs("heart_rate", NOW - timedelta(minutes=2 * k), "instant", value_num=60 + (k % 40), source_tool="get_heart_rates") for k in range(n)], NOW - timedelta(minutes=1))
+    st.upsert_observations([Obs("heart_rate", NOW - timedelta(minutes=2 * k), "instant", value_num=60 + (k % 40), source_tool="dailyHeartRate") for k in range(n)], NOW - timedelta(minutes=1))
     st.upsert_observations([Obs("sleep_duration", NOW - timedelta(hours=3), "period_end", value_num=27000, period="night", period_date=date(2026, 10, 21), source_tool="get_sleep_summary")], NOW - timedelta(minutes=1))
 
 

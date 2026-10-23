@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import stat
 from dataclasses import dataclass
-from datetime import time
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo
@@ -12,7 +11,7 @@ from zoneinfo import ZoneInfo
 HERE = Path(__file__).resolve().parent.parent
 ENV_FILE = HERE / "service.env"
 STATE_DIR = HERE / "state"
-MIN_POLL_INTERVAL_MIN = 5  # the gate's own floor; configuring less is refused, not clamped silently
+MIN_POLL_INTERVAL_MIN = 5  # configuring less is refused, not clamped silently (the watch only syncs in batches anyway)
 
 
 class ConfigError(Exception):
@@ -55,22 +54,6 @@ def _int(v: str | None, default: int, name: str, lo: int, hi: int) -> int:
     return n
 
 
-def parse_slots(v: str | None, default: str, name: str) -> tuple[time, ...]:
-    out = []
-    for part in (v if v else default).split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            hh, mm = part.split(":")
-            out.append(time(int(hh), int(mm)))
-        except ValueError:
-            raise ConfigError(f"{name}: '{part}' is not HH:MM") from None
-    if not out:
-        raise ConfigError(f"{name} needs at least one HH:MM time")
-    return tuple(sorted(out))
-
-
 @dataclass(frozen=True)
 class Settings:
     worker_db_url: str | None
@@ -81,14 +64,8 @@ class Settings:
     cors_origins: tuple[str, ...]
     polling_enabled: bool
     tz: ZoneInfo
-    fast_interval_min: int
-    stress_interval_min: int
-    sleep_slots: tuple[time, ...]
-    hrv_slots: tuple[time, ...]
-    spo2_resp_slots: tuple[time, ...]
-    readiness_slots: tuple[time, ...]
-    slot_retry_min: int
-    slot_max_attempts: int
+    personal_api_key: str | None
+    poll_min: int
     history_default_limit: int
     history_max_limit: int
     history_max_span_days: int
@@ -116,14 +93,8 @@ def load_settings(environ: Mapping[str, str] | None = None, env_file: Path | Non
         cors_origins=cors,
         polling_enabled=_bool(g("GARMIN_POLLING_ENABLED"), False),  # off unless switched on explicitly
         tz=tz,
-        fast_interval_min=_int(g("GARMIN_FAST_INTERVAL_MIN"), 7, "GARMIN_FAST_INTERVAL_MIN", MIN_POLL_INTERVAL_MIN, 240),
-        stress_interval_min=_int(g("GARMIN_STRESS_INTERVAL_MIN"), 30, "GARMIN_STRESS_INTERVAL_MIN", MIN_POLL_INTERVAL_MIN, 720),
-        sleep_slots=parse_slots(g("GARMIN_SLEEP_SLOTS"), "07:30,11:30", "GARMIN_SLEEP_SLOTS"),
-        hrv_slots=parse_slots(g("GARMIN_HRV_SLOTS"), "08:00,18:00", "GARMIN_HRV_SLOTS"),
-        spo2_resp_slots=parse_slots(g("GARMIN_SPO2_RESP_SLOTS"), "09:00,21:00", "GARMIN_SPO2_RESP_SLOTS"),
-        readiness_slots=parse_slots(g("GARMIN_READINESS_SLOTS"), "08:00,14:00,20:00", "GARMIN_READINESS_SLOTS"),
-        slot_retry_min=_int(g("GARMIN_SLOT_RETRY_MIN"), 60, "GARMIN_SLOT_RETRY_MIN", MIN_POLL_INTERVAL_MIN, 720),
-        slot_max_attempts=_int(g("GARMIN_SLOT_MAX_ATTEMPTS"), 4, "GARMIN_SLOT_MAX_ATTEMPTS", 1, 12),
+        personal_api_key=(g("GARMIN_PERSONAL_API_KEY") or "").strip() or None,
+        poll_min=_int(g("GARMIN_POLL_MIN"), 10, "GARMIN_POLL_MIN", MIN_POLL_INTERVAL_MIN, 240),
         history_default_limit=_int(g("GARMIN_HISTORY_DEFAULT_LIMIT"), 500, "GARMIN_HISTORY_DEFAULT_LIMIT", 1, 5000),
         history_max_limit=_int(g("GARMIN_HISTORY_MAX_LIMIT"), 2000, "GARMIN_HISTORY_MAX_LIMIT", 1, 5000),
         history_max_span_days=_int(g("GARMIN_HISTORY_MAX_SPAN_DAYS"), 14, "GARMIN_HISTORY_MAX_SPAN_DAYS", 1, 90),

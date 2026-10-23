@@ -1,4 +1,4 @@
-"""Read-only JSON API over the stored Garmin metrics. It NEVER calls Garmin or the gateway: every answer comes from the local database.
+"""Read-only JSON API over the stored Garmin metrics. It NEVER calls Garmin: every answer comes from the local database.
 
   GET /api/garmin/v1/health          liveness of this process (no auth, no database)
   GET /api/garmin/v1/metrics         catalogue of metrics, what is unsupported and why
@@ -329,14 +329,14 @@ def create_app(settings: Settings, store, now_fn=lambda: datetime.now(timezone.u
             counters["requests"] += r.requests
             counters["cache_hits"] += r.cache_hits
             counters["new_rows"] += r.rows_new
-            if r.outcome in {"error", "schema_drift", "auth_failed", "needs_login"}:
+            if r.outcome in {"error", "schema_drift", "auth_failed"}:
                 counters["errors"] += 1
             if r.outcome == "rate_limited":
                 counters["rate_limited"] += 1
         recent_errors = [
             {"at": iso(r.started_at), "job": r.job, "outcome": r.outcome, "error_class": r.error_class, "message": scrub(r.error_text)}
             for r in runs
-            if r.outcome in {"error", "schema_drift", "auth_failed", "needs_login", "rate_limited", "partial"} and (r.error_class or r.error_text)
+            if r.outcome in {"error", "schema_drift", "auth_failed", "rate_limited", "partial"} and (r.error_class or r.error_text)
         ][:5]
         successes = [s["last_success_at"] for k, s in states.items() if k != WORKER_ROW and s.get("last_success_at")]
         return JSONResponse(

@@ -13,10 +13,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from .parsers import Obs
-from .scheduler import JobState
 
 WORKER_ROW = "_worker"
 _SECRET_LIKE = re.compile(r"(eyJ[A-Za-z0-9_\-\.]{10,}|[A-Fa-f0-9]{32,}|[A-Za-z0-9_\-]{40,}|Bearer\s+\S+|https?://\S+|[\w.+-]+@[\w-]+\.[\w.]+)")
+
+
+@dataclass(frozen=True)
+class JobState:
+    """Per job-group bookkeeping, shown by /status."""
+
+    last_attempt_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_outcome: str | None = None
+    consecutive_failures: int = 0
+    slot_key: str | None = None
+    slot_attempts: int = 0
 
 
 def scrub(text: str | None, limit: int = 160) -> str | None:

@@ -1,75 +1,48 @@
-# Garmin metrics service (poller + read-only API)
+# Garmin metrics service (official Personal API poller + read-only API)
 
-`gsvc/` polls the gateway below on a conservative schedule, stores the results in PostgreSQL (migration `backend/db/migrations/0011_garmin_metrics.sql`)
-and serves them at `/api/garmin/v1/*` from a separate local process (default `127.0.0.1:8310`, reached only through nginx). The API never calls Garmin.
-Frontend contract: `MASTER-PROMPT-GARMIN-FRONTEND.md`. Status: implemented and tested offline (99 tests, plus the store contract against a scratch Postgres);
-NOT deployed to production until the steps in "Deploy" are approved and run.
+`gsvc/` reads your Garmin data from **Garmin's official Personal API** and stores it in PostgreSQL (migration `backend/db/migrations/0011_garmin_metrics.sql`).
+A second, separate process serves the stored data at `/api/garmin/v1/*` (default `127.0.0.1:8310`, reached only through nginx). The API never calls Garmin.
+Frontend contract: `MASTER-PROMPT-GARMIN-FRONTEND.md`.
 
-Schedule (env, all optional): `GARMIN_POLLING_ENABLED` (default **false**), `GARMIN_FAST_INTERVAL_MIN=7` (minimum 5; heart rate, 15-min steps, day totals, exercise),
-`GARMIN_STRESS_INTERVAL_MIN=30` (stress and body-battery series), slots in local time `GARMIN_SLEEP_SLOTS=07:30,11:30`, `GARMIN_HRV_SLOTS=08:00,18:00`,
-`GARMIN_SPO2_RESP_SLOTS=09:00,21:00`, `GARMIN_READINESS_SLOTS=08:00,14:00,20:00`, `GARMIN_SLOT_RETRY_MIN=60`, `GARMIN_SLOT_MAX_ATTEMPTS=4`, `GARMIN_LOCAL_TZ=Asia/Beirut`.
-Never speeds up on success. About 0.9k gateway calls a day at 7 minutes; the watch often syncs less often than that, so unchanged answers are cache hits.
-Pause without touching data: `python -m gsvc.cli pause` / `resume`. Safety: one shared Gate (>= 2 s between calls, 5 min poll floor, 429 backoff 5/15/60/180/360 min with Retry-After,
-breaker after 3 failures), auth failure or NEEDS_LOGIN pauses polling and is never retried, nothing here can sign in (tested).
-Unsupported (no gateway tool): skin temperature, RR intervals, per-minute steps. `get_activities_fordate` and `get_training_readiness` shapes are unverified (no data on the probe day).
-Retention: observations are kept (about 1k rows a day); poll-run logs 30 days.
+There is nothing to sign in to: you create one **Personal API key** in Garmin Connect (Settings > Personal API token). The poller exchanges it for a 24 h bearer
+token (renewed automatically) and makes read-only GET requests. No password, no MFA, no third-party gateway, no browser login.
 
-Deploy (needs approval, VM): apply migration 0011 (backup first), `deploy/setup-roles.sh`, copy `gsvc/` + files into `~/garmin-mcp`, `pip install -r requirements.txt`,
-install the two systemd units, add `deploy/nginx-garmin.conf.snippet` to both nginx sites (`nginx -t`, reload), start the API, then one supervised `python -m gsvc.cli once`
-with `GARMIN_POLLING_ENABLED=true` before enabling the worker service.
+## What it fetches (about 9 requests every 10 minutes)
 
----
+| Every cycle (10 min) | Every 30 min | Hourly |
+|---|---|---|
+| heart rate (about every 2 min), day summary (steps, distance, intensity minutes, active calories, stress average, SpO2, respiration) | body battery, last night's sleep, overnight HRV | the 10 latest exercise sessions |
 
-# garmin-mcp: read your Garmin data from the VM through the SAME gateway your claude.ai "garmin" connector uses
+Shortly after midnight the previous day is fetched too. The watch only syncs in batches, so polling faster returns the same answer; the interval cannot be set below 5 minutes.
 
-The connector in your Claude settings points at `https://missingmcp.com/garmin/mcp`: a free hosted gateway (run by one person, built on the
-open-source `garmin_mcp`) with an OAuth sign-in. **There is no API key and no payment.** You sign in once on its page with your Garmin email and password
-(+ MFA); it keeps only encrypted Garmin session tokens and gives the client an OAuth token. `connector_client.py` does that sign-in once, by hand,
-then refreshes its own token automatically and saves compact daily metrics as JSON under `data/<day>/`.
+What is **not** available from this API (checked against real answers): steps per 15 minutes, a stress score across the day, activity level, beat-to-beat intervals, skin
+temperature. The catalogue (`GET /metrics`) lists what exists and `UNSUPPORTED` says why the rest does not.
 
-## Rules (enforced and tested)
+## Safety
 
-- **No unattended sign-in.** `tools` and `poll` can refresh their saved token but can NEVER start a sign-in: with no usable token they stop, write
-  `~/garmin-mcp/NEEDS_LOGIN` and print "Run login manually". Only `login`, run by you in a terminal and guarded by `login_guard.py`
-  (15 min gap, 24 h block after a 429/403/locked answer, max 3 attempts per 24 h, history in `~/.garminconnect/login_attempts.json`), starts one.
-- **Read-only.** Only 10 `get_*` tools can be called (sleep, stress, heart rate, respiration, HRV, resting HR, body battery, SpO2, daily stats,
-  readiness). Writes (log food, edit/delete activities, upload/schedule workouts, weight, ...) are refused locally.
-- **Gentle.** >= 2 s between requests, one poll per 5 minutes, backoff 5/15/60/180 min (cap 6 h) after rate-limit answers, circuit breaker after 3
-  failures in a row; state survives restarts (`state/gate_state.json`).
-- No timer, cron or service exists. Never create one that runs `login`.
+- Read-only: the code only issues GETs (plus the token exchange). The key is sent to the token endpoint only.
+- Backoff: HTTP 429 or Garmin errors back off exponentially (honours `Retry-After`, capped at 1 h); the loop never runs faster because requests succeed.
+- A rejected key pauses polling (`state/AUTH_FAILED`) until a person fixes it and runs `python -m gsvc.cli resume`. `python -m gsvc.cli pause` stops polling without touching data.
+- The key lives only in `service.env` (chmod 600) on the VM as `GARMIN_PERSONAL_API_KEY`. Never commit it, never put it in the app bundle.
 
-## One-time sign-in (do it only when connect.garmin.com works in your browser and 24-48 h have passed since your last failed Garmin attempt)
+## Run
 
-The gateway checks your Garmin password with Garmin during sign-in, so a sign-in during a Garmin cool-down can extend it.
-
-```bash
-ssh -i ~/.ssh/oracle_sep5.key ubuntu@139.185.53.135
-cd ~/garmin-mcp
-./venv/bin/python connector_client.py check      # offline: should say "saved tokens: NO"
-./venv/bin/python connector_client.py login      # type YES, open the link it prints in ANY browser (laptop or phone), sign in
+```
+python -m gsvc.cli status      # flags and settings, sends nothing
+python -m gsvc.cli once        # one cycle now
+python -m gsvc.cli run-worker  # what the systemd unit runs
 ```
 
-After you finish signing in, the browser shows "page cannot be reached" for `http://127.0.0.1:8976/callback?code=...&state=...`. That is expected:
-copy the **full address** from the address bar and paste it into the terminal. Then:
+Settings (env or `service.env`): `GARMIN_PERSONAL_API_KEY`, `GARMIN_POLLING_ENABLED` (default false), `GARMIN_POLL_MIN` (default 10), `GARMIN_LOCAL_TZ` (default Asia/Beirut),
+`GARMIN_WORKER_DATABASE_URL`, `GARMIN_API_DATABASE_URL`, `GARMIN_API_TOKEN`, `GARMIN_API_HOST/PORT`, `GARMIN_CORS_ORIGINS`, history limits.
 
-```bash
-./venv/bin/python connector_client.py tools      # which tools the real server offers and which this client may use
-./venv/bin/python connector_client.py poll       # today's metrics -> data/<today>/*.json (+ _manifest.json without values)
-```
+## Switching an existing VM install from the old gateway
 
-If `tools` or `poll` ever prints `NEEDS LOGIN`, the saved token was rejected; only then run `login` again (and only after checking `python login_guard.py`).
+1. Copy `gsvc/`, `requirements.txt` and `deploy/*.service` into `~/garmin-mcp` (the old `connector_client.py`, `login_guard.py`, `oauth_support.py`, `rate_gate.py`, `oauth/`, `state/NEEDS_LOGIN` and `data/` can be deleted).
+2. In `service.env`: add `GARMIN_PERSONAL_API_KEY=...`, replace `GARMIN_FAST_INTERVAL_MIN` with `GARMIN_POLL_MIN=10`, delete the slot variables. `chmod 600 service.env`.
+3. `sudo systemctl restart sugarsense-garmin-api sugarsense-garmin-worker`, then `python -m gsvc.cli once` and check `/status`.
+Rows already stored by the gateway stay in the database; the removed metrics (`steps_interval`, `activity_level`, `stress_level`, ...) simply stop getting new values.
 
-## Other commands
+## Tests
 
-```bash
-./venv/bin/python -m pytest -q                       # 23 offline tests
-./venv/bin/python tests/local_server_check.py        # end to end against a local stand-in server (no internet)
-```
-
-## Good to know
-
-- The gateway is a third party that holds your Garmin session tokens (its page says the password is "never stored"). Revoke it by disconnecting
-  the connector in claude.ai; this client's own tokens are in `./oauth` (delete the folder to forget them).
-- In claude.ai (Settings > Connectors > garmin) the write tools such as "Add body composition" are set to always allowed. Consider setting those to
-  "Needs approval" or "Blocked", since they can change your Garmin account.
-- Not verified against the real gateway yet: the sign-in flow, the tool names and the data shapes. `data/` is not read by the SugarSense backend yet.
+`pytest tests` (71 tests): client (token cache/renewal, typed errors), parsers (synthetic payloads with the real keys), worker (scheduling, backoff, pause flags), store and API.

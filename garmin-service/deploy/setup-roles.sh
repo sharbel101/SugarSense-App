@@ -25,6 +25,8 @@ GARMIN_API_HOST=127.0.0.1
 GARMIN_API_PORT=8310
 GARMIN_LOCAL_TZ=Asia/Beirut
 GARMIN_POLLING_ENABLED=false
-GARMIN_FAST_INTERVAL_MIN=7
+GARMIN_POLL_MIN=10
+# Put your Garmin Personal API key on the next line by hand (Garmin Connect > Settings > Personal API token). Never commit it.
+GARMIN_PERSONAL_API_KEY=
 EOF
 echo "roles created, $ENVF written (600). Polling is OFF."

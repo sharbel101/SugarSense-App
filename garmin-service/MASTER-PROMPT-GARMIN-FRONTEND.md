@@ -9,7 +9,7 @@ Copy everything below this line into the frontend chat.
 You are the SugarSense frontend AI (`mobile/`, React Native + Expo + TypeScript). Follow `CLAUDE.md` section 2 (safety, UI language) and `mobile/docs/UIUX_COMPLIANCE.md`. Add a read-only display of Garmin wearable data from our own backend API.
 
 ## Hard rules
-- Never contact Garmin or the Garmin MCP gateway, and never store Garmin credentials. Only call the SugarSense Garmin API below.
+- Never contact Garmin, and never store Garmin credentials. Only call the SugarSense Garmin API below.
 - Polling this API is free: it only reads our database and never triggers a Garmin request. You may refresh every 60 s while the screen is visible, and not at all in the background.
 - Measured activity and heart rate are shown as measurements with their age. NEVER present elevated heart rate, activity or stress as proof of low glucose, and never merge them into any hypoglycaemia-risk number; keep them visually separate from model-estimated risk. Garmin does not measure glucose.
 - Copy: "Measured by your Garmin watch", "last synced X ago". Not medical advice.
@@ -28,7 +28,7 @@ Header on every call except health: `x-app-token: <token>`. The token only keeps
 export type Kind = 'instant' | 'interval' | 'cumulative' | 'daily_summary' | 'event';
 export type TsSemantics = 'instant' | 'interval_start' | 'period_start' | 'period_end';
 export interface Entry {
-  value: number | Record<string, unknown>; // number, or an object for structured metrics (sleep_stages, hrv_status, activity_level)
+  value: number | Record<string, unknown>; // number, or an object for structured metrics (sleep_stages, hrv_status)
   unit: string | null; kind: Kind; origin: 'raw_sensor' | 'garmin_derived';
   measured_at: string; ts_semantics: TsSemantics; fetched_at: string;
   age_seconds: number; fetched_age_seconds: number; quality: 'available' | 'stale';
@@ -41,7 +41,7 @@ export type Observation = Omit<Entry, 'age_seconds' | 'fetched_age_seconds' | 'q
 export interface HistoryResponse { count: number; limit: number; has_more: boolean; next_cursor: string | null; observations: Observation[] }
 ```
 
-Metric names you can rely on: `heart_rate` (bpm, instant), `steps_interval` (15-minute counts), `steps_day_cumulative` (running day total: show the latest, NEVER sum rows), `distance_day_cumulative`, `active_seconds_day`, `highly_active_seconds_day`, `sedentary_seconds_day`, `intensity_minutes_moderate_day`, `intensity_minutes_vigorous_day`, `active_kcal_day`, `activity_level` (value.level), `exercise_session` (event; value = duration s, `details` has type/distance/avg_hr; unverified shape, tolerate missing fields), `stress_level` and `body_battery` (0-100, Garmin-calculated), `resting_heart_rate`, `sleep_duration`, `sleep_score`, `sleep_stages`, `hrv_overnight_avg`, `hrv_status`, `spo2_*`, `respiration_*`, `training_readiness` (often absent). Not available: skin temperature, beat-to-beat RR, per-minute steps. Missing metrics are absent from `metrics` and listed in `missing_metrics`: render "no data yet", never 0.
+Metric names you can rely on: `heart_rate` (bpm, instant, about every 2 minutes), `steps_day_cumulative` (running day total: show the latest, NEVER sum rows), `distance_day_cumulative`, `intensity_minutes_moderate_day`, `intensity_minutes_vigorous_day`, `active_kcal_day`, `exercise_session` (event; value = duration s, `details` has type/distance/avg_hr), `body_battery` (0-100, Garmin-calculated, a few points a day), `stress_day_avg` (daily, Garmin-calculated), `resting_heart_rate`, `resting_heart_rate_7d_avg`, `heart_rate_day_max/min`, `sleep_duration`, `sleep_score`, `sleep_stages`, `sleep_avg_stress`, `hrv_overnight_avg`, `hrv_status`, `spo2_day_avg/lowest`, `spo2_sleep_avg`, `respiration_*`. Not available any more: per-15-minute steps, activity level, and a stress score across the day (the official API gives daily totals only). Absent metrics: show "no data yet", never 0.
 
 ## Build
 1. `mobile/src/api/garminClient.ts`: typed client (fetch with 10 s timeout, token header, error mapping to a discriminated result type; no retries on 4xx; one retry with backoff on network error/503). Parse dates with `new Date(iso)`; format in the user's local zone only at display time.
@@ -49,7 +49,7 @@ Metric names you can rely on: `heart_rate` (bpm, instant), `steps_interval` (15-
 3. UI (place it in the existing Wearable screen, `mobile/src/screens/WearableScreen.tsx`, following the repo's design system): a heart-rate chart for the last 6 h (points, gaps left as gaps, no interpolation), today's steps (latest cumulative) plus a bar chart of `steps_interval`, activity level strip, stress/body-battery sparkline, last sleep card (duration, stages, score, HRV) and exercise list. Each card shows "measured HH:mm (X min ago)" from `age_seconds`, and a plain-language Garmin-calculated badge when `origin === 'garmin_derived'`.
 4. States for every card: loading skeleton; error (network/401/503) with retry; empty ("no data yet"); stale (`quality === 'stale'`, grey with the age); paused/backing-off banner from `/status.polling.state`.
 5. Stale versus unchanged: use `/status`. If `groups.fast.last_successful_fetch_at` is recent but `last_measurement_at` is old, say "Waiting for your watch to sync" (the watch uploads in batches, a 20-30 minute lag is normal). If the last successful fetch itself is old or `state !== 'normal'`, say "Garmin data is not updating" with the reason. Do not call an unchanged value stale just because it did not move.
-6. Later link to the hypoglycaemia-risk model (not now): the model may consume `heart_rate`, `steps_interval`/`activity_level` and `exercise_session` as separate features with their `age_seconds` and a coverage flag (missing = coverage 0, never zero). Expose them as typed selectors only; do not compute risk in the UI.
+6. Later link to the hypoglycaemia-risk model (not now): the model may consume `heart_rate`, `steps_day_cumulative`/`exercise_session_level` and `exercise_session` as separate features with their `age_seconds` and a coverage flag (missing = coverage 0, never zero). Expose them as typed selectors only; do not compute risk in the UI.
 7. Tests (the repo's runner): client success/401/503/network/timeout mapping; cursor paging; `missing_metrics` renders "no data yet"; cumulative steps are never summed; stale and paused states; UTC to local formatting around the DST change on 25 Oct 2026 (Lebanon).
 
 Report real test output before saying it works.
