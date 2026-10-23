@@ -185,6 +185,8 @@ class Candidate:
     facts_hash: str = ""
     evidence_level: Optional[str] = None       # descriptive | exploratory | repeated | validated (see evidence.py); filled by the detector or by the pipeline default
     pattern_id: Optional[str] = None           # stable id of the pattern (not of one occurrence); used for deduplication across runs
+    criteria: Optional[str] = None             # the exact rule behind evidence_level when it differs from the generic text in evidence.py
+    detail: dict = field(default_factory=dict) # supporting measurements for the Details view: relevant days/events, comparison periods, alternatives (stored in evidence.detail)
 
     def fact(self, ref: str) -> Optional[Fact]:
         return next((f for f in self.facts if f.ref == ref), None)

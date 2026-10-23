@@ -90,3 +90,20 @@ def grade_directional(blocks: list[tuple[float, float]], material: float, tests:
     if first_ok and second_ok:
         return Graded(VALIDATED, p, "holds in both halves of the period")
     return Graded(REPEATED, p, "consistent overall; not confirmed in both halves")
+
+
+def grade_recurrence(hits: list[bool], min_hits: int, min_eligible: int, min_fraction: float) -> tuple[str | None, str]:
+    """Day-level recurrence (an event on k of n eligible days, in time order). Returns (level, reason); level None = not reported.
+    repeated: k >= min_hits, n >= min_eligible and k/n >= min_fraction. validated: repeated AND k >= 4 AND the pattern holds (>= 50% of eligible days)
+    in BOTH the earlier and the later half of the period, so it is not one burst of days."""
+    n, k = len(hits), sum(1 for h in hits if h)
+    if n < min_eligible:
+        return None, f"only {n} eligible days (needs {min_eligible})"
+    if k < min_hits:
+        return None, f"seen on {k} days (needs {min_hits})"
+    if k / n < min_fraction:
+        return None, f"seen on {k} of {n} days (needs {int(min_fraction * 100)}%)"
+    half = n // 2
+    a, b = hits[:half], hits[half:]
+    both = k >= 4 and a and b and sum(a) / len(a) >= 0.5 and sum(b) / len(b) >= 0.5
+    return (VALIDATED if both else REPEATED), ("holds in both halves of the period" if both else "recurring; not confirmed in both halves")

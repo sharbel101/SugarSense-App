@@ -22,7 +22,7 @@ function row(over: Record<string, unknown> = {}) {
     observation_end: T0,
     validation_status: 'valid',
     content_version: 1,
-    evidence: { facts: [{ ref: 'E1', name: 'coverage', value: 100, unit: '%', kind: 'computed' }], coverage: 1, method: 'stays outside the reporting range', quality_flags: [] },
+    evidence: { facts: [{ ref: 'E1', name: 'coverage', value: 100, unit: '%', kind: 'computed' }], coverage: 1, method: 'stays outside the reporting range', quality_flags: [], level: 'repeated', pattern_id: 'p1', detail: { status: 'new', days: [{ date: '2026-10-20', affected: true }], title: 'Glucose is often high between 15:00 and 18:00' } },
     content: {
       headline: 'Time outside your range',
       facts_text: ['Today so far: 3 stay(s) above 180 mg/dL [E2].'],
@@ -73,7 +73,7 @@ describe('GET /insights', () => {
     // a row written before v2 has no paragraph: the validated explanation is shown on the front, and the new back-of-card fields still exist
     expect(first.paragraph).toBe('Glucose stayed above range three times.');
     expect(first).toMatchObject({ source: 'rules', reasoning: 'Glucose stayed above range three times.', safety: null });
-    expect(first.evidence).toMatchObject({ coverage: 1, method: 'stays outside the reporting range', qualityFlags: [] });
+    expect(first.evidence).toMatchObject({ coverage: 1, method: 'stays outside the reporting range', qualityFlags: [], level: 'repeated', patternId: 'p1', detail: { status: 'new', days: [{ date: '2026-10-20', affected: true }] } });
     expect(res.body.insights.map((i: { category: string }) => i.category)).toEqual(['episode_digest', 'episode_time_pattern']);
     // asked for the right user and limit, and only for active, unexpired rows
     const [sql, params] = query.mock.calls[0] as [string, unknown[]];

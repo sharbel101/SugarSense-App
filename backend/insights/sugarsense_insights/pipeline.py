@@ -19,6 +19,7 @@ from . import episodes as E
 from . import reasoning as R
 from . import patterns as P
 from . import performance as PERF
+from . import research as RS
 from . import evidence as EV
 from .config import ENGINE_VERSION, PROMPT_VERSION, Weights
 from .llm import Explainer, candidate_payload
@@ -51,6 +52,12 @@ def run_key_for(kind: str, snap: Snapshot) -> str:
     if kind == "event":
         return f"event:{d}:{int(snap.now.timestamp() // 900)}"   # one event run per 15-minute bucket
     return f"{kind}:{d}:v{ENGINE_VERSION.rsplit('-', 1)[-1]}"   # a new engine version writes today's briefing again instead of being skipped as already done
+
+
+SINGLETON_CATEGORIES = {
+    "forecast_outlook", "previous_day_context", "heading_low", "day_summary", "forecast_performance", "time_window_high", "post_meal_pattern", "variability_change",
+    "baseline_shift", "hypo_pattern", "insulin_fall_pattern", "data_completeness",
+}
 
 
 def forecast_performance_enabled() -> bool:
@@ -156,6 +163,9 @@ def build_candidates(kind: str, snap: Snapshot, clean, flags, av: dict[str, Avai
         c[:] = [x for x in c if not (x.category == "glucose_excursion" and x.window[0] in starts)]
         add(A.heading_low(snap, clean, flags))
         add(P.data_quality(snap, clean, flags, "event"))
+    if kind in ("morning", "evening") and av["glucose"].ok:
+        c.extend(RS.candidates(snap, clean, d, kind))   # research-informed patterns (research.py); each returns nothing unless its evidence rules are met
+        c[:] = RS.reconcile(c)
     # one card per stay: a reasoning card (unexplained high, low after a dose or activity) replaces the plain context list for the same stay
     stays = {x.key.rsplit(":", 1)[1] for x in c if x.category in ("unexplained_high", "low_after_dose", "post_activity_low")}
     c[:] = [x for x in c if not (x.category == "episode_context" and x.key.rsplit(":", 1)[1] in stays)]
@@ -302,7 +312,7 @@ def _accept(c: Candidate, it: dict[str, Any], accepted: list[str]) -> None:
 
 def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: Store, llm: Optional[Explainer], *, model_version: Optional[str] = None,
         weights: Weights = Weights(), persist: bool = True) -> RunResult:
-    snap = source.load(user_id, now, 14)
+    snap = source.load(user_id, now, RS.LOOKBACK_DAYS)
     th = snap.settings.th
     key = run_key_for(kind, snap)
     if persist:
@@ -343,6 +353,7 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
         out = []
         for d in picked:
             c = d.candidate
+            c.detail["status"] = "updated" if d.supersedes else "new"   # a finding that is unchanged is kept as it is and not regenerated
             if c.category == "data_availability" or c.python_only:
                 c.validation_status = "not_applicable"
             ttl = th.event_ttl_h if kind == "event" else th.scheduled_ttl_h
@@ -353,7 +364,7 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
                 "supersedes_insight_id": d.supersedes, "observation_start": c.window[0], "observation_end": c.window[1], "priority": c.priority,
                 "validation_status": c.validation_status, "created_at": now, "expires_at": now + timedelta(hours=ttl),
                 "evidence": {"facts": [{"ref": f.ref, "name": f.name, "value": f.value, "unit": f.unit, "kind": f.kind} for f in c.facts], "coverage": round(c.coverage, 3),
-                             "quality_flags": c.quality_flags, "method": c.method, "level": c.evidence_level or EV.default_level(c.category), "pattern_id": c.pattern_id or c.key, "level_criteria": EV.CRITERIA[c.evidence_level or EV.default_level(c.category)], "boundaries": c.boundaries, "window": [c.window[0].isoformat(), c.window[1].isoformat()]},
+                             "quality_flags": c.quality_flags, "method": c.method, "level": c.evidence_level or EV.default_level(c.category), "pattern_id": c.pattern_id or c.key, "level_criteria": c.criteria or EV.CRITERIA[c.evidence_level or EV.default_level(c.category)], "detail": c.detail, "boundaries": c.boundaries, "window": [c.window[0].isoformat(), c.window[1].isoformat()]},
                 "content": render(c),
             }
             rec["evidence_facts"] = [[f.name, f.value, f.unit] for f in c.facts]
@@ -361,6 +372,8 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
                 if d.supersedes:
                     store.supersede(d.supersedes, now)
                 rec["insight_id"] = store.save_insight(user_id, run_id, rec)
+                if rec["insight_id"] and c.category in SINGLETON_CATEGORIES:   # one live card per finding type: the newest replaces the older ones instead of piling up
+                    store.expire_older(user_id, c.category, rec["insight_id"], now)
             out.append(rec)
         stats["insights"] = len(out)
         stats["categories"] = sorted(r["category"] for r in out)

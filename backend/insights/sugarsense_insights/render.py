@@ -27,6 +27,14 @@ HEADLINES = {
     "heading_low": "Glucose may be heading low",
     "frequent_lows": "Lows keep coming back",
     "forecast_performance": "How your forecasts have been doing",
+    "time_window_high": "A recurring high-glucose window",
+    "hypo_pattern": "Lows over the last two weeks",
+    "overnight_pattern": "An overnight pattern",
+    "variability_change": "Your glucose variability changed",
+    "baseline_shift": "Compared with your usual",
+    "post_meal_pattern": "Your usual response after meals",
+    "insulin_fall_pattern": "Glucose after recorded insulin",
+    "data_completeness": "Records look incomplete",
 }
 
 
@@ -34,7 +42,7 @@ def render(c: Candidate) -> dict:
     """The stored/delivered content. 'paragraph' is the ONE text a card shows: the model's validated paragraph (source 'ai') or Python's own (source 'rules').
     facts_text, limitations and evidence stay available for a details view and for audit; the card does not need them."""
     return {
-        "headline": HEADLINES.get(c.category, c.category),
+        "headline": c.detail.get("title") or HEADLINES.get(c.category, c.category),
         "paragraph": c.paragraph or " ".join(c.claims),
         "source": c.paragraph_source,
         "facts_text": list(c.claims),

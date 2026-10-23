@@ -34,7 +34,7 @@ class GlucoseOnly(unittest.TestCase):
         r = run("evening", USER, EVENING, FakeSource(snap), InMemoryStore(), FakeLLM(), persist=False)
         cats = [i["category"] for i in r.insights]
         self.assertGreaterEqual(len(cats), 2, cats)
-        self.assertIn("episode_digest", cats); self.assertIn("episode_time_pattern", cats)
+        self.assertIn("episode_digest", cats); self.assertTrue({"episode_time_pattern", "time_window_high"} & set(cats))   # the research card replaces the older block card for the same finding
         self.assertNotIn("episode_context", cats)                  # no meals/insulin/activity: no link is invented
         self.assertTrue(all(i["validation_status"] == "valid" for i in r.insights))
         text = json.dumps([i["content"] for i in r.insights]).lower()

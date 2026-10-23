@@ -115,6 +115,7 @@ function toItem(r: InsightRow): InsightItem | null {
       level: 'level' in ev && ev.level ? ev.level : null,
       patternId: 'pattern_id' in ev && ev.pattern_id ? ev.pattern_id : null,
       levelCriteria: 'level_criteria' in ev && ev.level_criteria ? ev.level_criteria : null,
+      detail: 'detail' in ev && ev.detail ? ev.detail : null,
       qualityFlags: ev.quality_flags,
       facts: ev.facts,
     },
