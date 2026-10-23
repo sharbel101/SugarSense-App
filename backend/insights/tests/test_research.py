@@ -285,6 +285,19 @@ class Reconcile(unittest.TestCase):
         self.assertEqual([c.category for c in RS.reconcile([cand("hypo_pattern"), cand("frequent_lows")])], ["hypo_pattern"])
 
 
+class StayDuplicates(unittest.TestCase):
+    def test_a_context_card_retires_the_plain_excursion_card_of_the_same_stay_but_not_of_another_stay(self):
+        store = InMemoryStore()
+        rid = store.claim_run(USER, "k", "event", NOW, "e", "p", None)[0]
+        rec = lambda cat, key: {"category": cat, "trigger": "event", "dedupe_key": key, "facts_hash": key, "content_version": 1, "priority": 1, "validation_status": "valid", "created_at": NOW, "expires_at": NOW + timedelta(hours=6), "evidence": {}, "content": {}, "observation_start": NOW, "observation_end": NOW}
+        a = store.save_insight(USER, rid, rec("glucose_excursion", "excursion:20261023T0921"))
+        other = store.save_insight(USER, rid, rec("glucose_excursion", "excursion:20261023T0600"))
+        keep = store.save_insight(USER, rid, rec("episode_context", "episode_ctx:above:20261023T0921"))
+        self.assertEqual(store.expire_stay_duplicates(USER, "20261023T0921", ("glucose_excursion",), keep, NOW), 1)
+        active = {i["insight_id"] for i in store.active(USER, NOW)}
+        self.assertEqual(active, {other, keep})
+
+
 class PipelineIntegration(unittest.TestCase):
     def _afternoon_high_snapshot(self):
         fn = lambda t: 215 if (15 <= t.hour < 18 and day_index(t) != 4) else 110

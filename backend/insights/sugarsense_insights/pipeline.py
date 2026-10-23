@@ -54,6 +54,7 @@ def run_key_for(kind: str, snap: Snapshot) -> str:
     return f"{kind}:{d}:v{ENGINE_VERSION.rsplit('-', 1)[-1]}"   # a new engine version writes today's briefing again instead of being skipped as already done
 
 
+STAY_CATEGORIES = {"episode_context", "unexplained_high", "low_after_dose", "post_activity_low"}
 SINGLETON_CATEGORIES = {
     "forecast_outlook", "previous_day_context", "heading_low", "day_summary", "forecast_performance", "time_window_high", "post_meal_pattern", "variability_change",
     "baseline_shift", "hypo_pattern", "insulin_fall_pattern", "data_completeness",
@@ -372,6 +373,8 @@ def run(kind: str, user_id: str, now: datetime, source: SnapshotSource, store: S
                 if d.supersedes:
                     store.supersede(d.supersedes, now)
                 rec["insight_id"] = store.save_insight(user_id, run_id, rec)
+                if rec["insight_id"] and c.category in STAY_CATEGORIES:   # one card per stay across runs: a reasoning/context card retires the plain excursion card for the same stay
+                    store.expire_stay_duplicates(user_id, c.key.rsplit(":", 1)[-1], ("glucose_excursion",) if c.category == "episode_context" else ("glucose_excursion", "episode_context"), rec["insight_id"], now)
                 if rec["insight_id"] and c.category in SINGLETON_CATEGORIES:   # one live card per finding type: the newest replaces the older ones instead of piling up
                     store.expire_older(user_id, c.category, rec["insight_id"], now)
             out.append(rec)

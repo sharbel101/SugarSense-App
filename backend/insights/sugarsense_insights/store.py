@@ -20,6 +20,7 @@ class Store(Protocol):
     def supersede(self, insight_id: str, now: datetime) -> None: ...
     def expire_category(self, user_id: str, category: str, now: datetime) -> int: ...
     def expire_older(self, user_id: str, category: str, keep_id: str, now: datetime) -> int: ...
+    def expire_stay_duplicates(self, user_id: str, stay: str, categories: tuple, keep_id: str, now: datetime) -> int: ...
     def active(self, user_id: str, now: datetime) -> list[dict[str, Any]]: ...
 
 
@@ -73,6 +74,14 @@ class InMemoryStore:
         n = 0
         for iid, i in self.insights.items():
             if iid != keep_id and i["user_id"] == user_id and i["category"] == category and i["status"] == "active":
+                i["status"] = "expired"
+                n += 1
+        return n
+
+    def expire_stay_duplicates(self, user_id, stay, categories, keep_id, now):
+        n = 0
+        for iid, i in self.insights.items():
+            if iid != keep_id and i["user_id"] == user_id and i["status"] == "active" and i["category"] in categories and str(i.get("dedupe_key", "")).rsplit(":", 1)[-1] == stay:
                 i["status"] = "expired"
                 n += 1
         return n
@@ -143,6 +152,10 @@ class PgStore:
     def expire_older(self, user_id, category, keep_id, now):
         with self._conn() as c:
             return c.execute("UPDATE insights SET status='expired', updated_at=%s WHERE user_id=%s AND category=%s AND status='active' AND insight_id<>%s::uuid", (now, user_id, category, keep_id)).rowcount
+
+    def expire_stay_duplicates(self, user_id, stay, categories, keep_id, now):
+        with self._conn() as c:
+            return c.execute("UPDATE insights SET status='expired', updated_at=%s WHERE user_id=%s AND status='active' AND category = ANY(%s) AND regexp_replace(dedupe_key, '^.*:', '') = %s AND insight_id<>%s::uuid", (now, user_id, list(categories), stay, keep_id)).rowcount
 
     def active(self, user_id, now):
         with self._conn() as c:
