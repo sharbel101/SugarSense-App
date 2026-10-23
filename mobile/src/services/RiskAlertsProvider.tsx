@@ -9,6 +9,8 @@ import {
   type AlertNotification,
   type AlertState,
 } from './riskAlerts';
+import { showToast } from './toast';
+import { alertToast } from './toastText';
 import { alertPermission, requestAlertPermission, showAlert, type AlertPermission } from './webNotifications';
 
 const STATE_KEY = 'sugarsense.riskAlerts.v1';
@@ -73,6 +75,8 @@ export function RiskAlertsProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const deliver = useCallback(async (list: AlertNotification[]) => {
+    // The in-app toast is always shown while the app is open; the browser notification only if turned on and allowed.
+    for (const n of list) showToast(alertToast(n));
     if (!enabledRef.current || alertPermission() !== 'granted') return;
     for (const n of list) await showAlert(n);
   }, []);

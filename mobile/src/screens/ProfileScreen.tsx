@@ -9,6 +9,8 @@ import { PullToRefreshScrollView } from '../components/PullToRefreshScrollView';
 import { SegmentedControl, SegmentOption } from '../components/SegmentedControl';
 import { RootStackParamList } from '../navigation/types';
 import { useGlucose } from '../services/GlucoseProvider';
+import { setToastPref, useToastPref } from '../services/toastPrefs';
+import { CheckRow } from '../components/FormField';
 import { radius, spacing, ThemePreference, useColors, useTheme } from '../theme';
 
 type Row = { icon: IconName; label: string; badge?: string };
@@ -49,6 +51,7 @@ const SECTIONS: { title?: string; rows: Row[] }[] = [
 
 export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
   const { colors, preference, setPreference } = useTheme();
+  const toastsOn = useToastPref();
   const { refresh, refreshing } = useGlucose();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ground }}>
@@ -89,6 +92,9 @@ export function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackPa
         <View>
           <SectionTitle>Alerts</SectionTitle>
           <AlertsControlCard />
+          <View style={{ marginTop: 12 }}>
+            <CheckRow checked={toastsOn} onChange={setToastPref} label="Show in-app toasts (saved entries, forecast updates, alerts)" />
+          </View>
         </View>
 
         {SECTIONS.map((section, sIndex) => (

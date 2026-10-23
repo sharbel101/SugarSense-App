@@ -16,6 +16,8 @@ import {
   type MissedMealState,
 } from './mealSpike';
 import { useRiskAlerts } from './RiskAlertsProvider';
+import { showToast } from './toast';
+import { alertToast } from './toastText';
 import { alertPermission, showAlert } from './webNotifications';
 
 const KEY = 'sugarsense.missedMeal.v1';
@@ -71,22 +73,24 @@ export function MissedMealProvider({ children }: { children: React.ReactNode }) 
     return detectMealSpike(readings, meals, nowMs);
   }, [okData, mealsKnown, recent, records, nowMs]);
 
-  // One notification per spike (and at most one per 3 hours). Only when the person turned alerts on and the browser
-  // allows them, so a switched-off feature never uses up the budget.
+  // One notification per spike (and at most one per 3 hours): an in-app toast always, plus a browser notification when
+  // the person turned alerts on and the browser allows them.
   useEffect(() => {
-    if (!loaded || !spike || !enabled || alertPermission() !== 'granted') return;
+    if (!loaded || !spike) return;
     const r = evaluateMissedMeal(stateRef.current, spike, Date.now());
     if (!r.notify) return;
     stateRef.current = r.state;
     setState(r.state);
     void AsyncStorage.setItem(KEY, serializeMissedMeal(r.state)).catch(() => undefined);
-    void showAlert({
-      kind: 'meal',
-      type: 'missed_meal',
+    const note = {
+      kind: 'meal' as const,
+      type: 'missed_meal' as const,
       title: 'Glucose rose quickly',
       body: `${spikeSummary(spike)} If you ate or took insulin, log your meal and insulin.`,
       tag: 'sugarsense-missed-meal',
-    });
+    };
+    showToast(alertToast(note));
+    if (enabled && alertPermission() === 'granted') void showAlert(note);
   }, [loaded, spike, enabled]);
 
   const dismiss = useCallback(() => {
